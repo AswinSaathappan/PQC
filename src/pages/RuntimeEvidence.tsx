@@ -92,8 +92,57 @@ export default function RuntimeEvidence() {
   const counts = { obs: runtimeEvents.filter(e => e.status === "Observed").length, not: runtimeEvents.filter(e => e.status === "Not Observed in Current Execution").length, inc: runtimeEvents.filter(e => e.status === "Inconclusive").length };
 
   return (
-    <div className="flex-1 overflow-y-auto bg-[#f5f6f8]">
-      <div className="max-w-[1320px] mx-auto px-6 py-6 space-y-5">
+    <div className="relative flex-1 h-full overflow-hidden bg-[#f5f6f8]">
+      {/* ============================================================ */}
+      {/* UNDER DEVELOPMENT OVERLAY                                    */}
+      {/* Fully obscures the underlying page and prevents interaction.  */}
+      {/* ============================================================ */}
+      <div 
+        className="absolute inset-0 z-50 flex items-center justify-center p-4 select-none"
+        style={{ backgroundColor: "rgba(248, 250, 252, 0.98)" }}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="runtime-dev-title"
+      >
+        <div className="bg-white border border-[#e2e8f0] rounded-2xl shadow-xl max-w-md w-full p-8 text-center">
+          {/* Progress / Development Icon */}
+          <div className="w-12 h-12 rounded-xl bg-[#1e3a5f]/10 border border-[#1e3a5f]/20 flex items-center justify-center text-[#1e3a5f] mx-auto mb-4">
+            <Activity className="w-6 h-6 text-[#1e3a5f]" />
+          </div>
+
+          {/* Modal Header */}
+          <h2 id="runtime-dev-title" className="text-lg font-bold text-[#1a1d23] mb-3">
+            Runtime Evidence Under Development
+          </h2>
+
+          {/* Main Message */}
+          <p className="text-[13px] font-medium text-[#334155] mb-2 leading-relaxed">
+            Runtime evidence analysis is currently under development.
+          </p>
+
+          {/* Secondary Message */}
+          <p className="text-[12px] text-[#64748b] mb-6 leading-relaxed">
+            Runtime evidence collection and validation are being integrated with the cryptographic analysis pipeline.
+          </p>
+
+          {/* Status Label */}
+          <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-blue-50 border border-blue-200 text-blue-700 text-[11px] font-semibold tracking-wide">
+            <span className="w-2 h-2 rounded-full bg-blue-600 animate-pulse" />
+            In Progress
+          </div>
+        </div>
+      </div>
+
+      {/* ============================================================ */}
+      {/* EXISTING RUNTIME EVIDENCE PAGE CONTENT                      */}
+      {/* Preserved completely intact; obscured and non-interactive.  */}
+      {/* ============================================================ */}
+      <div 
+        className="h-full overflow-hidden pointer-events-none select-none opacity-0"
+        aria-hidden="true"
+        tabIndex={-1}
+      >
+        <div className="max-w-[1320px] mx-auto px-6 py-6 space-y-5">
 
         {/* Key distinction */}
         <div className="bg-[#1e3a5f] rounded-lg px-5 py-4">
@@ -165,7 +214,7 @@ export default function RuntimeEvidence() {
                 </tr>
               </thead>
               <tbody>
-                {filtered.map((row, i) => {
+                {filtered.map((row: any, i: number) => {
                   const cfg = statusConfig[row.status];
                   const Icon = cfg.icon;
                   return (
@@ -216,6 +265,7 @@ export default function RuntimeEvidence() {
           )}
         </div>
 
+        </div>
       </div>
     </div>
   );

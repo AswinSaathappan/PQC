@@ -16,7 +16,7 @@ const profileData = {
     runtimeEvidence: "Observed (10:32:19)",
     observedOps: ["Sign", "Verify", "Key Generation"],
     dependencies: ["Document Service", "API Gateway", "Session Manager"],
-    risk: "High — Vulnerable to Shor's algorithm. Immediate migration planning recommended.",
+    risk: "High - Vulnerable to Shor's algorithm. Immediate migration planning recommended.",
   },
   "AES-256-GCM": {
     type: "Symmetric Encryption",
@@ -30,7 +30,7 @@ const profileData = {
     runtimeEvidence: "Observed (10:32:14)",
     observedOps: ["Encrypt", "Decrypt"],
     dependencies: ["Storage Service", "API Gateway"],
-    risk: "Low — AES-256 is considered quantum-safe under Grover's algorithm analysis.",
+    risk: "Low - AES-256 is considered quantum-safe under Grover's algorithm analysis.",
   },
 };
 
@@ -40,7 +40,7 @@ export default function CryptoProfile() {
 
   const riskColor = profile.quantumStatus === "Vulnerable" ? "text-red-700 bg-red-50 border-red-200"
     : profile.quantumStatus === "Safe" ? "text-emerald-700 bg-emerald-50 border-emerald-200"
-    : "text-amber-700 bg-amber-50 border-amber-200";
+      : "text-amber-700 bg-amber-50 border-amber-200";
 
   return (
     <div className="flex-1 overflow-y-auto bg-[#f5f6f8]">
@@ -52,9 +52,8 @@ export default function CryptoProfile() {
           <div className="flex gap-2 flex-wrap">
             {assets.map(a => (
               <button key={a} onClick={() => setSelected(a)}
-                className={`text-[12px] font-medium px-3 py-1.5 rounded-md mono transition-colors ${
-                  selected === a ? "bg-[#1e3a5f] text-white" : "bg-[#f5f6f8] text-[#1a1d23] hover:bg-[#eef0f3] border border-[#dde1e9]"
-                }`}>{a}</button>
+                className={`text-[12px] font-medium px-3 py-1.5 rounded-md mono transition-colors ${selected === a ? "bg-[#1e3a5f] text-white" : "bg-[#f5f6f8] text-[#1a1d23] hover:bg-[#eef0f3] border border-[#dde1e9]"
+                  }`}>{a}</button>
             ))}
           </div>
         </div>
@@ -143,10 +142,9 @@ export default function CryptoProfile() {
               <AlertTriangle size={14} className="text-[#d97706]" />
               <div className="text-[13px] font-semibold text-[#1a1d23]">Risk Context & Dependencies</div>
             </div>
-            <div className={`rounded-md px-3 py-2 text-[11px] mb-4 border ${
-              profile.quantumStatus === "Vulnerable" ? "bg-red-50 border-red-200 text-red-700"
-              : "bg-emerald-50 border-emerald-200 text-emerald-700"
-            }`}>{profile.risk}</div>
+            <div className={`rounded-md px-3 py-2 text-[11px] mb-4 border ${profile.quantumStatus === "Vulnerable" ? "bg-red-50 border-red-200 text-red-700"
+                : "bg-emerald-50 border-emerald-200 text-emerald-700"
+              }`}>{profile.risk}</div>
             <div>
               <div className="text-[11px] text-[#6b7589] mb-2 flex items-center gap-1.5"><GitBranch size={11} /> Connected Dependencies</div>
               <div className="space-y-1.5">

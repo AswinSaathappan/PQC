@@ -8,21 +8,14 @@ const inputTypes = [
   { id: "container", icon: Container, label: "Container Image", sub: "OCI / Docker container image" },
 ];
 
-const stages = [
-  { label: "DISCOVER", sub: "Cryptographic artefact discovery" },
-  { label: "VERIFY", sub: "Runtime evidence collection" },
-  { label: "ASSESS", sub: "Quantum risk assessment" },
-  { label: "PRIORITIZE", sub: "Migration ranking" },
-  { label: "RECOMMEND", sub: "PQC / Hybrid guidance" },
-];
-
-type Status = "pending" | "running" | "done";
-
 const stepLabels = ["Add Application", "Application Context", "Analysis Configuration", "Review & Start"];
 
-interface Props { onComplete?: () => void; }
+interface Props {
+  onComplete?: () => void;
+  onNavigate?: (route: string) => void;
+}
 
-export default function NewAnalysis({ onComplete }: Props) {
+export default function NewAnalysis({ onComplete, onNavigate }: Props) {
   const [step, setStep] = useState(1);
 
   // Step 1
@@ -32,38 +25,42 @@ export default function NewAnalysis({ onComplete }: Props) {
   // Step 2
   const [criticality, setCriticality] = useState("");
   const [sensitivity, setSensitivity] = useState("");
-  const [dataLifetime, setDataLifetime] = useState("");
+  const [dataLifetime, setDataLifetime] = useState<number | "">(5);
 
   // Step 3
   const [runtimeEnabled, setRuntimeEnabled] = useState(true);
   const [crqcYear, setCrqcYear] = useState(2036);
 
-  // Step 4 / Running
-  const [running, setRunning] = useState(false);
-  const [stageProgress, setStageProgress] = useState<Status[]>(stages.map(() => "pending"));
-
   const canNext1 = appName.trim().length > 0 && inputType !== null;
-  const canNext2 = criticality !== "" && sensitivity !== "" && dataLifetime !== "";
+  const canNext2 = criticality !== "" && sensitivity !== "" && typeof dataLifetime === 'number' && dataLifetime > 0;
 
-  function startAnalysis() {
-    setRunning(true);
-    const progress: Status[] = stages.map(() => "pending");
-    let i = 0;
-    const tick = () => {
-      if (i < stages.length) {
-        progress[i] = "running";
-        setStageProgress([...progress]);
-        setTimeout(() => {
-          progress[i] = "done";
-          i++;
-          setStageProgress([...progress]);
-          setTimeout(tick, 300);
-        }, 800);
-      } else {
-        setTimeout(() => onComplete?.(), 1200);
+  async function startAnalysis() {
+    try {
+      const formData = new FormData();
+      formData.append("applicationName", appName);
+      const critVal = criticality === "Critical" ? 4 : criticality === "High" ? 3 : criticality === "Medium" ? 2 : 1;
+      const sensVal = sensitivity === "Highly Confidential" ? 4 : sensitivity === "Confidential" ? 3 : sensitivity === "Internal" ? 2 : 1;
+      formData.append("businessCriticality", critVal.toString());
+      formData.append("dataSensitivity", sensVal.toString());
+      formData.append("runtimeEnabled", runtimeEnabled.toString());
+      formData.append("dataProtectionDuration", dataLifetime.toString());
+      formData.append("threatHorizonYear", crqcYear.toString());
+      formData.append("quantumRiskHorizon", (crqcYear - 2026).toString());
+
+      const res = await fetch("http://localhost:3001/api/analyses", {
+        method: "POST",
+        body: formData,
+      });
+
+      if (!res.ok) throw new Error("Failed to create analysis");
+      const analysis = await res.json();
+
+      if (onNavigate) {
+        onNavigate(`cbomkit_discovery:${analysis.analysisId}`);
       }
-    };
-    setTimeout(tick, 400);
+    } catch (e: any) {
+      alert("Failed to start analysis: " + e.message);
+    }
   }
 
   return (
@@ -102,7 +99,7 @@ export default function NewAnalysis({ onComplete }: Props) {
 
             <div>
               <label className="block text-[11px] font-semibold text-[#1a1d23] mb-1.5">Application Name *</label>
-              <input value={appName} onChange={e => setAppName(e.target.value)} placeholder="e.g. Digital Banking Platform"
+              <input value={appName} onChange={e => setAppName(e.target.value)} placeholder="e.g. pt-crypto"
                 className="w-full text-[12px] border border-[#dde1e9] rounded-md px-3 py-2 outline-none focus:border-[#1e3a5f] text-[#1a1d23] placeholder-[#9aa1b1] transition-colors" />
             </div>
 
@@ -147,6 +144,7 @@ export default function NewAnalysis({ onComplete }: Props) {
               <div className="text-[11px] text-[#6b7589]">This information helps assess cryptographic migration urgency and long-term quantum risk. Provide only what cannot be discovered automatically.</div>
             </div>
 
+            {/* Business Criticality */}
             <div>
               <label className="block text-[11px] font-semibold text-[#1a1d23] mb-1.5">Business Criticality *</label>
               <div className="flex gap-2">
@@ -159,28 +157,41 @@ export default function NewAnalysis({ onComplete }: Props) {
               </div>
             </div>
 
+            {/* Data Sensitivity */}
             <div>
               <label className="block text-[11px] font-semibold text-[#1a1d23] mb-1.5">Data Sensitivity *</label>
-              <div className="flex gap-2 flex-wrap">
+              <div className="flex gap-2">
                 {["Public", "Internal", "Confidential", "Highly Confidential"].map(s => (
                   <button key={s} onClick={() => setSensitivity(s)}
-                    className={`text-[11px] font-medium px-3 py-1.5 rounded-md border transition-all flex-1 ${
+                    className={`flex-1 text-[11px] font-medium py-1.5 rounded-md border transition-all ${
                       sensitivity === s ? "border-[#1e3a5f] bg-[#f0f4fa] text-[#1e3a5f] font-bold" : "border-[#dde1e9] text-[#6b7589] hover:border-[#1e3a5f]/40"
                     }`}>{s}</button>
                 ))}
               </div>
             </div>
 
+            {/* Expected Data Lifetime — Numeric input */}
             <div>
-              <label className="block text-[11px] font-semibold text-[#1a1d23] mb-1.5">Expected Data Lifetime *</label>
-              <div className="grid grid-cols-3 gap-2">
-                {["Short-term", "Medium-term", "Long-term", "Extended-term", "Custom duration"].map(l => (
-                  <button key={l} onClick={() => setDataLifetime(l)}
-                    className={`text-[11px] font-medium py-2 px-3 rounded-md border transition-all text-center ${
-                      dataLifetime === l ? "border-[#1e3a5f] bg-[#f0f4fa] text-[#1e3a5f] font-bold" : "border-[#dde1e9] text-[#6b7589] hover:border-[#1e3a5f]/40"
-                    }`}>{l}</button>
-                ))}
-              </div>
+              <label className="block text-[11px] font-semibold text-[#1a1d23] mb-1.5">Data Protection Duration (Years) *</label>
+              <input 
+                type="number" 
+                min="1" 
+                max="100" 
+                value={dataLifetime === '' ? '' : dataLifetime} 
+                onChange={e => {
+                  const val = e.target.value;
+                  if (val === '') {
+                    setDataLifetime('');
+                  } else {
+                    const parsed = parseInt(val, 10);
+                    if (!isNaN(parsed)) {
+                      setDataLifetime(parsed);
+                    }
+                  }
+                }}
+                className="w-full text-[12px] border border-[#dde1e9] rounded-md px-3 py-2 outline-none focus:border-[#1e3a5f] text-[#1a1d23] transition-colors"
+              />
+              <div className="text-[10px] text-[#9aa1b1] mt-1.5">How many years does this data need to remain secure? (X in Mosca's Theorem)</div>
             </div>
 
             <div className="flex justify-between pt-1">
@@ -260,7 +271,7 @@ export default function NewAnalysis({ onComplete }: Props) {
         )}
 
         {/* ── Step 4: Review & Start ── */}
-        {step === 4 && !running && (
+        {step === 4 && (
           <div className="bg-white border border-[#dde1e9] rounded-lg p-6 space-y-5">
             <div>
               <div className="text-[15px] font-bold text-[#1a1d23] mb-0.5">Review & Start Analysis</div>
@@ -270,11 +281,10 @@ export default function NewAnalysis({ onComplete }: Props) {
             <div className="bg-[#f9fafb] border border-[#dde1e9] rounded-lg divide-y divide-[#eef0f3]">
               {[
                 { label: "Application", value: appName },
-                { label: "Input", value: inputTypes.find(t => t.id === inputType)?.label ?? "—" },
                 { label: "Business Criticality", value: criticality },
                 { label: "Data Sensitivity", value: sensitivity },
-                { label: "Expected Data Lifetime", value: dataLifetime },
-                { label: "Runtime Verification", value: runtimeEnabled ? "Enabled" : "Disabled" },
+                { label: "Data Protection Duration", value: `${dataLifetime} Years` },
+                { label: "Runtime Verification", value: runtimeEnabled ? "Enabled" : "Not Enabled" },
                 { label: "CRQC Planning Scenario", value: String(crqcYear) },
               ].map(r => (
                 <div key={r.label} className="flex justify-between px-4 py-3">
@@ -286,53 +296,10 @@ export default function NewAnalysis({ onComplete }: Props) {
 
             <div className="flex justify-between pt-1">
               <button onClick={() => setStep(3)} className="text-[12px] text-[#6b7589] px-3 py-1.5 hover:text-[#1a1d23] transition-colors">Back</button>
-              <button onClick={startAnalysis}
+              <button onClick={async () => await startAnalysis()}
                 className="text-[13px] font-bold bg-[#1e3a5f] text-white px-6 py-2.5 rounded-md hover:bg-[#162e4d] transition-colors">
                 Start Analysis
               </button>
-            </div>
-          </div>
-        )}
-
-        {/* ── Running: Analysis Progress ── */}
-        {running && (
-          <div className="bg-white border border-[#dde1e9] rounded-lg p-6">
-            <div className="text-[15px] font-bold text-[#1a1d23] mb-1">{appName}</div>
-            <div className="text-[11px] text-[#6b7589] mb-6">Analysis in progress — CRYPTAVISTA is running the full ECDAT workflow</div>
-
-            <div className="space-y-3">
-              {stages.map((stage, i) => {
-                const status = stageProgress[i];
-                return (
-                  <div key={i} className={`flex items-center gap-4 rounded-lg border px-5 py-3.5 transition-all ${
-                    status === "running" ? "border-[#1e3a5f] bg-[#f0f4fa]"
-                    : status === "done" ? "border-emerald-200 bg-emerald-50/50"
-                    : "border-[#dde1e9] bg-[#f9fafb] opacity-50"
-                  }`}>
-                    <div className={`w-6 h-6 rounded-full flex items-center justify-center flex-shrink-0 ${
-                      status === "done" ? "bg-emerald-500"
-                      : status === "running" ? "bg-[#1e3a5f]"
-                      : "bg-[#dde1e9]"
-                    }`}>
-                      {status === "done" ? <CheckCircle size={13} className="text-white" />
-                        : status === "running"
-                        ? <div className="w-2.5 h-2.5 border-2 border-white/40 border-t-white rounded-full animate-spin" />
-                        : <span className="text-[9px] text-white font-bold">{i + 1}</span>}
-                    </div>
-                    <div className="flex-1">
-                      <div className={`text-[12px] font-bold ${status === "running" ? "text-[#1e3a5f]" : status === "done" ? "text-emerald-700" : "text-[#9aa1b1]"}`}>{stage.label}</div>
-                      <div className="text-[10px] text-[#9aa1b1]">{stage.sub}</div>
-                    </div>
-                    <div className={`text-[10px] font-semibold ${
-                      status === "done" ? "text-emerald-600"
-                      : status === "running" ? "text-[#1e3a5f]"
-                      : "text-[#9aa1b1]"
-                    }`}>
-                      {status === "done" ? "✓ Complete" : status === "running" ? "◐ In Progress" : "○ Pending"}
-                    </div>
-                  </div>
-                );
-              })}
             </div>
           </div>
         )}

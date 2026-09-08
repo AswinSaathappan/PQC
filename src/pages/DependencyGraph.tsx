@@ -1,96 +1,145 @@
 import { useEffect, useRef, useState } from "react";
 import cytoscape from "cytoscape";
+import { ZoomIn, ZoomOut, RotateCcw, X, Info, Loader2 } from "lucide-react";
 
-const elements = [
-  // Crypto assets (center)
-  { data: { id: "rsa", label: "RSA-2048", type: "crypto", impact: "critical" } },
-  { data: { id: "ecdsa", label: "ECDSA P-256", type: "crypto", impact: "critical" } },
-  { data: { id: "aes", label: "AES-256-GCM", type: "crypto", impact: "low" } },
+interface GlobalAnalysis {
+  analysisId: string;
+  applicationName: string;
+  status?: string;
+}
 
-  // Libraries
-  { data: { id: "openssl", label: "OpenSSL 3.x", type: "library", impact: "high" } },
-  { data: { id: "pyca", label: "pyca/cryptography", type: "library", impact: "high" } },
+interface Props {
+  selectedAnalysisId?: string;
+  analyses?: GlobalAnalysis[];
+  onSelectAnalysis?: (id: string) => void;
+}
 
-  // Applications
-  { data: { id: "auth", label: "Auth Service", type: "app", impact: "critical" } },
-  { data: { id: "portal", label: "Customer Portal", type: "app", impact: "high" } },
-  { data: { id: "payment", label: "Payment Service", type: "app", impact: "critical" } },
-  { data: { id: "docs", label: "Document Service", type: "app", impact: "medium" } },
-  { data: { id: "legacy", label: "Legacy API", type: "app", impact: "low" } },
-
-  // Infrastructure
-  { data: { id: "nginx", label: "nginx:alpine", type: "infra", impact: "medium" } },
-  { data: { id: "db", label: "DB Encryption", type: "infra", impact: "high" } },
-
-  // Edges
-  { data: { id: "e1", source: "rsa", target: "auth" } },
-  { data: { id: "e2", source: "rsa", target: "payment" } },
-  { data: { id: "e3", source: "ecdsa", target: "payment" } },
-  { data: { id: "e4", source: "ecdsa", target: "auth" } },
-  { data: { id: "e5", source: "aes", target: "docs" } },
-  { data: { id: "e6", source: "openssl", target: "portal" } },
-  { data: { id: "e7", source: "openssl", target: "nginx" } },
-  { data: { id: "e8", source: "pyca", target: "auth" } },
-  { data: { id: "e9", source: "pyca", target: "docs" } },
-  { data: { id: "e10", source: "rsa", target: "db" } },
-  { data: { id: "e11", source: "openssl", target: "legacy" } },
-  { data: { id: "e12", source: "auth", target: "portal" } },
-];
-
-const nodeColors: Record<string, { bg: string; border: string; label: string }> = {
-  crypto: { bg: "#fee2e2", border: "#c0392b", label: "Crypto Asset" },
-  library: { bg: "#fef3c7", border: "#d97706", label: "Library" },
-  app: { bg: "#dbeafe", border: "#1e3a5f", label: "Application" },
-  infra: { bg: "#f0fdf4", border: "#0d7a6b", label: "Infrastructure" },
-};
-
-const impactBadge: Record<string, string> = {
-  critical: "bg-red-50 text-red-700 border border-red-200",
-  high: "bg-orange-50 text-orange-700 border border-orange-200",
-  medium: "bg-amber-50 text-amber-700 border border-amber-200",
-  low: "bg-emerald-50 text-emerald-700 border border-emerald-200",
-};
-
-export default function DependencyGraph() {
+export default function DependencyGraph({ selectedAnalysisId, analyses = [], onSelectAnalysis }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const cyRef = useRef<cytoscape.Core | null>(null);
-  const [selectedNode, setSelectedNode] = useState<{ id: string; label: string; type: string; impact: string } | null>(null);
+  const [selectedNode, setSelectedNode] = useState<any | null>(null);
+  const [elements, setElements] = useState<any[]>([]);
+  const [uniqueAssetsCount, setUniqueAssetsCount] = useState<number>(0);
+  const [cbomOccurrencesCount, setCbomOccurrencesCount] = useState<number>(0);
+  const [available, setAvailable] = useState<boolean>(true);
+  const [loading, setLoading] = useState<boolean>(true);
 
+  const effectiveAnalysisId = selectedAnalysisId || analyses[0]?.analysisId;
+
+  // 1. Fetch graph data whenever analysis changes
+  useEffect(() => {
+    let isCancelled = false;
+
+    async function fetchGraph() {
+      if (!effectiveAnalysisId) {
+        if (!isCancelled) {
+          setElements([]);
+          setUniqueAssetsCount(0);
+          setCbomOccurrencesCount(0);
+          setAvailable(false);
+          setLoading(false);
+        }
+        return;
+      }
+
+      try {
+        setLoading(true);
+        setSelectedNode(null);
+
+        const res = await fetch(`http://localhost:3001/api/analyses/${effectiveAnalysisId}/dependency-graph`);
+        if (res.ok) {
+          const data = await res.json();
+          if (!isCancelled) {
+            if (data.available && Array.isArray(data.elements) && data.elements.length > 0) {
+              setElements(data.elements);
+              setUniqueAssetsCount(data.uniqueAssets || data.elements.filter((e: any) => !e.data?.source).length);
+              setCbomOccurrencesCount(data.cbomOccurrences || 16);
+              setAvailable(true);
+            } else {
+              setElements([]);
+              setUniqueAssetsCount(0);
+              setCbomOccurrencesCount(0);
+              setAvailable(false);
+            }
+          }
+        } else {
+          if (!isCancelled) {
+            setElements([]);
+            setAvailable(false);
+          }
+        }
+      } catch (err) {
+        console.error("Failed to load dependency graph", err);
+        if (!isCancelled) {
+          setElements([]);
+          setAvailable(false);
+        }
+      } finally {
+        if (!isCancelled) {
+          setLoading(false);
+        }
+      }
+    }
+
+    fetchGraph();
+    return () => {
+      isCancelled = true;
+    };
+  }, [effectiveAnalysisId]);
+
+  // 2. Initialize Cytoscape once container is mounted and elements are ready
   useEffect(() => {
     if (!containerRef.current) return;
 
+    if (!available || elements.length === 0) {
+      if (cyRef.current) {
+        cyRef.current.destroy();
+        cyRef.current = null;
+      }
+      return;
+    }
+
+    // Destroy existing instance before creating a new one
+    if (cyRef.current) {
+      cyRef.current.destroy();
+      cyRef.current = null;
+    }
+
     const cy = cytoscape({
       container: containerRef.current,
-      elements,
+      elements: JSON.parse(JSON.stringify(elements)), // fresh clone
       style: [
         {
           selector: "node",
           style: {
-            "background-color": (ele: any) => nodeColors[ele.data("type")]?.bg ?? "#f5f6f8",
-            "border-color": (ele: any) => nodeColors[ele.data("type")]?.border ?? "#dde1e9",
-            "border-width": 2,
-            label: "data(label)",
+            "background-color": "#ffffff",
+            "border-color": (ele: any) =>
+              ele.data("assetType") === "algorithm" ? "#2563eb" : "#f59e0b",
+            "border-width": 2.5,
+            label: "data(displayLabel)",
             "font-size": "10px",
-            "font-family": "Inter, sans-serif",
+            "font-family": "Inter, system-ui, -apple-system, sans-serif",
             "font-weight": "600",
             "text-valign": "center",
             "text-halign": "center",
-            color: "#1a1d23",
-            width: (ele: any) => ele.data("type") === "crypto" ? 80 : ele.data("type") === "library" ? 65 : 55,
-            height: (ele: any) => ele.data("type") === "crypto" ? 80 : ele.data("type") === "library" ? 65 : 55,
+            color: "#1e293b",
             "text-wrap": "wrap",
-            "text-max-width": "65px",
+            "text-max-width": "82px",
+            "line-height": 1.25,
+            shape: "ellipse",
+            width: 96,
+            height: 96,
           },
-        } as any,
+        },
         {
           selector: "edge",
           style: {
-            "line-color": "#dde1e9",
-            "target-arrow-color": "#dde1e9",
+            "line-color": "#94a3b8",
+            "target-arrow-color": "#64748b",
             "target-arrow-shape": "triangle",
-            "arrow-scale": 0.8,
+            "arrow-scale": 1.1,
             "curve-style": "bezier",
-            width: 1.5,
+            width: 2.2,
           },
         },
         {
@@ -98,30 +147,47 @@ export default function DependencyGraph() {
           style: {
             "border-color": "#1e3a5f",
             "border-width": 4,
-            "background-blacken": 0.08,
+            "shadow-blur": 14,
+            "shadow-color": "rgba(30, 58, 95, 0.25)",
+            "shadow-opacity": 0.9,
           },
         },
         {
           selector: ".highlighted",
-          style: { "line-color": "#1e3a5f", "target-arrow-color": "#1e3a5f", width: 2.5 },
+          style: {
+            "line-color": "#1e3a5f",
+            "target-arrow-color": "#1e3a5f",
+            width: 3.5,
+          },
         },
         {
           selector: ".dimmed",
-          style: { opacity: 0.2 },
+          style: { opacity: 0.25 },
         },
       ],
-      layout: { name: "cose", padding: 30, nodeRepulsion: () => 6000, idealEdgeLength: () => 100 } as any,
+      layout: {
+        name: "cose",
+        padding: 50,
+        nodeRepulsion: () => 8000,
+        idealEdgeLength: () => 120,
+        edgeElasticity: () => 32,
+        gravity: 0.25,
+        numIter: 1000,
+        initialTemp: 200,
+        coolingFactor: 0.95,
+        animate: false,
+        fit: true,
+      } as any,
       userZoomingEnabled: true,
       userPanningEnabled: true,
-      minZoom: 0.4,
-      maxZoom: 3,
+      minZoom: 0.3,
+      maxZoom: 2.5,
     });
 
     cy.on("tap", "node", (evt) => {
-      if (!cyRef.current) return;
       const node = evt.target;
       const d = node.data();
-      setSelectedNode({ id: d.id, label: d.label, type: d.type, impact: d.impact });
+      setSelectedNode(d);
 
       cy.elements().removeClass("highlighted dimmed");
       const connectedEdges = node.connectedEdges();
@@ -131,7 +197,6 @@ export default function DependencyGraph() {
     });
 
     cy.on("tap", (evt) => {
-      if (!cyRef.current) return;
       if (evt.target === cy) {
         setSelectedNode(null);
         cy.elements().removeClass("highlighted dimmed");
@@ -139,86 +204,339 @@ export default function DependencyGraph() {
     });
 
     cyRef.current = cy;
+
+    const fitGraph = () => {
+      if (!cy) return;
+      cy.resize();
+      cy.fit(undefined, 40);
+      const curZoom = cy.zoom();
+      if (!isFinite(curZoom) || curZoom < 0.4 || curZoom > 2.0) {
+        cy.zoom(1.0);
+        cy.center();
+      }
+    };
+
+    cy.ready(fitGraph);
+    cy.on("layoutstop", fitGraph);
+
+    // Ensure layout fits after initial DOM paint
+    const timer = setTimeout(fitGraph, 60);
+
+    // Observe container resizes
+    let ro: ResizeObserver | null = null;
+    if (typeof ResizeObserver !== "undefined" && containerRef.current) {
+      ro = new ResizeObserver(() => {
+        if (cyRef.current) {
+          cyRef.current.resize();
+        }
+      });
+      ro.observe(containerRef.current);
+    }
+
     return () => {
+      clearTimeout(timer);
+      if (ro) ro.disconnect();
       cy.stop(true, true);
       cy.destroy();
       cyRef.current = null;
     };
-  }, []);
+  }, [elements, available]);
 
-  const directDeps = selectedNode
-    ? elements.filter(e => "source" in (e.data ?? {}) && (e.data.source === selectedNode.id || e.data.target === selectedNode.id)).length
-    : 0;
+  const handleReset = () => {
+    if (cyRef.current) {
+      cyRef.current.resize();
+      cyRef.current.fit(undefined, 40);
+      const curZoom = cyRef.current.zoom();
+      if (!isFinite(curZoom) || curZoom < 0.4 || curZoom > 2.0) {
+        cyRef.current.zoom(1.0);
+        cyRef.current.center();
+      }
+    }
+  };
+
+  const handleZoomIn = () => {
+    if (cyRef.current) {
+      cyRef.current.zoom(cyRef.current.zoom() * 1.25);
+    }
+  };
+
+  const handleZoomOut = () => {
+    if (cyRef.current) {
+      cyRef.current.zoom(cyRef.current.zoom() * 0.8);
+    }
+  };
 
   return (
     <div className="flex-1 overflow-y-auto bg-[#f5f6f8]">
-      <div className="max-w-[1320px] mx-auto px-6 py-6 space-y-5">
+      <div className="max-w-[1500px] mx-auto px-6 py-6 space-y-4">
 
-        <div className="grid grid-cols-4 gap-4">
-          {/* Graph */}
-          <div className="col-span-3 bg-white border border-[#dde1e9] rounded-lg overflow-hidden">
-            <div className="px-5 py-4 border-b border-[#dde1e9] flex items-center justify-between">
-              <div>
-                <div className="text-[13px] font-semibold text-[#1a1d23]">Cryptographic Dependency Network</div>
-                <div className="text-[11px] text-[#6b7589]">Click nodes to explore dependencies · Drag to pan · Scroll to zoom</div>
-              </div>
-              <div className="flex gap-4 text-[10px]">
-                {Object.entries(nodeColors).map(([type, cfg]) => (
-                  <span key={type} className="flex items-center gap-1.5">
-                    <span className="w-3 h-3 rounded inline-block border" style={{ backgroundColor: cfg.bg, borderColor: cfg.border }} />
-                    <span className="text-[#6b7589]">{cfg.label}</span>
-                  </span>
-                ))}
-              </div>
+        {/* Clean Header */}
+        <div className="bg-white border border-[#dde1e9] rounded-lg px-6 py-4 flex flex-wrap items-center justify-between gap-4 shadow-sm">
+          <div>
+            <h1 className="text-xl font-bold text-[#1a1d23]">
+              Cryptographic Dependency Network
+            </h1>
+            <p className="text-sm text-[#6b7589] mt-0.5">
+              Relationships between detected cryptographic assets and the software components that use them.
+            </p>
+            <div className="mt-2 text-xs font-semibold text-[#1e3a5f]">
+              {uniqueAssetsCount} unique assets • {cbomOccurrencesCount} CBOM occurrences
             </div>
-            <div ref={containerRef} style={{ height: 420 }} />
           </div>
 
-          {/* Info panel */}
-          <div className="space-y-4">
-            {selectedNode ? (
-              <div className="bg-white border border-[#dde1e9] rounded-lg p-5">
-                <div className="text-[10px] text-[#6b7589] uppercase tracking-wide font-medium mb-2">Selected Node</div>
-                <div className="text-[14px] font-bold text-[#1a1d23] mb-1">{selectedNode.label}</div>
-                <div className="flex gap-2 mb-3 flex-wrap">
-                  <span className="text-[10px] bg-[#f5f6f8] border border-[#dde1e9] text-[#6b7589] px-2 py-0.5 rounded font-medium capitalize">{selectedNode.type}</span>
-                  <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full border capitalize ${impactBadge[selectedNode.impact]}`}>{selectedNode.impact} impact</span>
+          <div className="flex items-center gap-3">
+            <span className="text-xs text-[#6b7589] font-medium uppercase tracking-wider">Application:</span>
+            <select
+              value={effectiveAnalysisId || ""}
+              onChange={(e) => onSelectAnalysis && onSelectAnalysis(e.target.value)}
+              className="text-xs border border-[#dde1e9] rounded-md px-3 py-2 bg-[#f8fafc] text-[#1a1d23] font-semibold min-w-[220px] outline-none focus:border-[#1e3a5f] cursor-pointer"
+            >
+              {analyses.length === 0 && <option value="">No applications found</option>}
+              {analyses.map((a) => (
+                <option key={a.analysisId} value={a.analysisId}>
+                  {a.applicationName}
+                </option>
+              ))}
+            </select>
+          </div>
+        </div>
+
+        {/* Two-Column Main Area */}
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 items-start">
+
+          {/* Left Column: Interactive Node Inspection (4 cols) */}
+          <div className="lg:col-span-4 bg-white border border-[#dde1e9] rounded-lg shadow-sm p-5 min-h-[660px] flex flex-col">
+            <div className="pb-3 border-b border-[#dde1e9] flex items-center justify-between">
+              <div>
+                <h3 className="text-sm font-bold text-[#1e3a5f]">Interactive Node Inspection</h3>
+                <div className="text-[11px] text-[#6b7589] mt-0.5">Asset dependency inspector</div>
+              </div>
+              {selectedNode && (
+                <button
+                  onClick={() => {
+                    setSelectedNode(null);
+                    if (cyRef.current) cyRef.current.elements().removeClass("highlighted dimmed");
+                  }}
+                  className="p-1 text-gray-400 hover:text-gray-700 rounded hover:bg-gray-100"
+                  title="Clear Selection"
+                >
+                  <X size={15} />
+                </button>
+              )}
+            </div>
+
+            {!selectedNode ? (
+              <div className="flex-1 flex flex-col items-center justify-center text-center p-6 text-gray-500">
+                <div className="w-12 h-12 rounded-full bg-blue-50 border border-blue-100 flex items-center justify-center mb-3 text-blue-600">
+                  <Info size={20} />
                 </div>
-                <div className="space-y-2 text-[11px]">
-                  {[
-                    { label: "Direct Dependencies", value: directDeps },
-                    { label: "Node Type", value: nodeColors[selectedNode.type]?.label ?? "—" },
-                    { label: "Impact Level", value: selectedNode.impact.charAt(0).toUpperCase() + selectedNode.impact.slice(1) },
-                  ].map(item => (
-                    <div key={item.label} className="flex justify-between border-b border-[#f0f2f5] pb-1.5 last:border-0">
-                      <span className="text-[#6b7589]">{item.label}</span>
-                      <span className="font-medium text-[#1a1d23]">{item.value}</span>
-                    </div>
-                  ))}
+                <div className="text-xs font-medium text-gray-600">
+                  Click a node to view its dependency information.
                 </div>
               </div>
             ) : (
-              <div className="bg-white border border-[#dde1e9] rounded-lg p-5 text-center">
-                <div className="text-[#9aa1b1] text-[12px] py-8">Click a node to inspect dependencies</div>
+              <div className="py-4 space-y-4 text-xs overflow-y-auto flex-1">
+                {/* Selected Asset */}
+                <div className="bg-[#f8fafc] border border-[#dde1e9] rounded-md p-3">
+                  <div className="text-[10px] uppercase tracking-wider text-[#6b7589] font-bold">Selected Asset</div>
+                  <div className="text-base font-bold text-[#1e3a5f] mt-0.5">{selectedNode.label}</div>
+                </div>
+
+                {/* Asset Type & Primitive */}
+                <div className="grid grid-cols-2 gap-2">
+                  <div className="bg-[#f8fafc] border border-[#dde1e9] rounded-md p-2.5">
+                    <div className="text-[10px] text-[#6b7589] uppercase font-semibold">Asset Type</div>
+                    <div className="font-semibold text-gray-900 mt-0.5">{selectedNode.assetType || "algorithm"}</div>
+                  </div>
+                  <div className="bg-[#f8fafc] border border-[#dde1e9] rounded-md p-2.5">
+                    <div className="text-[10px] text-[#6b7589] uppercase font-semibold">Primitive</div>
+                    <div className="font-semibold text-gray-900 mt-0.5">{selectedNode.primitive || "—"}</div>
+                  </div>
+                </div>
+
+                {/* Occurrences & Locations */}
+                <div className="border border-[#dde1e9] rounded-md p-3 bg-white">
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="font-semibold text-gray-700">Occurrences</span>
+                    <span className="px-2 py-0.5 bg-blue-100 text-blue-800 rounded font-bold text-[11px]">
+                      {selectedNode.occurrencesCount}
+                    </span>
+                  </div>
+                  <div className="text-[11px] text-[#6b7589] mb-1.5 font-medium">Locations:</div>
+                  <div className="space-y-1 max-h-32 overflow-y-auto">
+                    {selectedNode.locations && selectedNode.locations.length > 0 ? (
+                      selectedNode.locations.map((loc: string, idx: number) => (
+                        <div
+                          key={idx}
+                          className="font-mono text-[11px] bg-[#f8fafc] border border-gray-200 px-2 py-1 rounded text-gray-700 truncate"
+                          title={loc}
+                        >
+                          • {loc}
+                        </div>
+                      ))
+                    ) : (
+                      <div className="text-gray-400 italic">No specific locations recorded</div>
+                    )}
+                  </div>
+                </div>
+
+                {/* Dependency Evidence */}
+                <div className="border border-[#dde1e9] rounded-md p-3 bg-white space-y-2">
+                  <div className="font-semibold text-gray-700">Dependency Evidence</div>
+
+                  {selectedNode.hasDependencyEvidence ? (
+                    <>
+                      <div className="flex justify-between text-gray-700">
+                        <span className="text-gray-500">Direct Dependents:</span>
+                        <span className="font-bold text-[#1e3a5f]">{selectedNode.directDependents}</span>
+                      </div>
+                      {selectedNode.directDependentsList && selectedNode.directDependentsList.length > 0 && (
+                        <div className="space-y-1 pl-2">
+                          {selectedNode.directDependentsList.map((d: string, idx: number) => (
+                            <div key={idx} className="bg-gray-50 border border-gray-200 px-2 py-0.5 rounded text-gray-700 text-[11px]">
+                              → {d}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+
+                      <div className="flex justify-between text-gray-700 pt-1">
+                        <span className="text-gray-500">Transitive Dependents:</span>
+                        <span className="font-bold text-[#1e3a5f]">{selectedNode.transitiveDependents}</span>
+                      </div>
+                      {selectedNode.transitiveDependentsList && selectedNode.transitiveDependentsList.length > 0 && (
+                        <div className="space-y-1 pl-2">
+                          {selectedNode.transitiveDependentsList.map((d: string, idx: number) => (
+                            <div key={idx} className="bg-gray-50 border border-gray-200 px-2 py-0.5 rounded text-gray-600 text-[11px]">
+                              ↳ {d}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+
+                      {selectedNode.dependsOnList && selectedNode.dependsOnList.length > 0 && (
+                        <div className="pt-1">
+                          <span className="text-gray-500 block mb-0.5">Depends On:</span>
+                          <div className="space-y-1 pl-2">
+                            {selectedNode.dependsOnList.map((d: string, idx: number) => (
+                              <div key={idx} className="bg-gray-50 border border-gray-200 px-2 py-0.5 rounded text-gray-600 text-[11px]">
+                                ← {d}
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      <div className="flex justify-between text-gray-700 pt-1 border-t border-gray-100">
+                        <span className="text-gray-500">Dependency Reach:</span>
+                        <span className="font-bold text-[#1e3a5f]">{selectedNode.dependencyReach}%</span>
+                      </div>
+
+                      <div className="flex justify-between text-gray-700">
+                        <span className="text-gray-500">Dependency Impact:</span>
+                        <span className="px-2 py-0.5 bg-emerald-100 text-emerald-800 rounded font-bold text-[11px]">
+                          Score: {selectedNode.dependencyImpactScore}
+                        </span>
+                      </div>
+
+                      <div className="mt-2 pt-2 border-t border-gray-100">
+                        <div className="text-[10px] text-gray-500 uppercase font-semibold mb-1">Calculation:</div>
+                        <div className="p-2 bg-blue-50/60 border border-blue-100 rounded text-blue-900 text-[11px] font-mono leading-relaxed">
+                          {selectedNode.calculation}
+                        </div>
+                      </div>
+                    </>
+                  ) : (
+                    <div className="space-y-2 text-[11px]">
+                      <div className="flex justify-between text-gray-700">
+                        <span className="text-gray-500">Dependency Impact:</span>
+                        <span className="px-2 py-0.5 bg-gray-100 text-gray-600 rounded font-medium text-[11px]">
+                          Unavailable
+                        </span>
+                      </div>
+                      <div className="text-gray-500 italic p-2 bg-gray-50 border border-gray-200 rounded">
+                        <span className="font-semibold block text-gray-700 not-italic">Reason:</span>
+                        No dependency relationship evidence was reported by the available static analysis.
+                      </div>
+                    </div>
+                  )}
+                </div>
               </div>
             )}
+          </div>
 
-            <div className="bg-white border border-[#dde1e9] rounded-lg p-4">
-              <div className="text-[11px] font-semibold text-[#1a1d23] mb-3">Network Summary</div>
-              {[
-                { label: "Crypto Assets", value: 3 },
-                { label: "Libraries", value: 2 },
-                { label: "Applications", value: 5 },
-                { label: "Infrastructure", value: 2 },
-                { label: "Total Dependencies", value: 12 },
-              ].map(item => (
-                <div key={item.label} className="flex justify-between text-[11px] py-1.5 border-b border-[#f0f2f5] last:border-0">
-                  <span className="text-[#6b7589]">{item.label}</span>
-                  <span className="font-bold text-[#1e3a5f]">{item.value}</span>
+          {/* Right Column: Large Graph (8 cols) */}
+          <div className="lg:col-span-8 bg-white border border-[#dde1e9] rounded-lg overflow-hidden shadow-sm flex flex-col min-h-[660px]">
+            {/* Graph Toolbar */}
+            <div className="px-5 py-3 border-b border-[#dde1e9] flex items-center justify-between bg-[#fafbfc]">
+              <div className="flex items-center gap-4 text-xs">
+                <span className="font-semibold text-[#1a1d23]">Dependency Map</span>
+                <span className="text-gray-300">|</span>
+                <div className="flex items-center gap-3 text-gray-600">
+                  <span className="flex items-center gap-1.5">
+                    <span className="w-3 h-3 rounded-full bg-white border-2 border-blue-600 inline-block"></span>
+                    <span>Algorithm</span>
+                  </span>
+                  <span className="flex items-center gap-1.5">
+                    <span className="w-3 h-3 rounded-full bg-white border-2 border-amber-500 inline-block"></span>
+                    <span>Related Key / Material</span>
+                  </span>
                 </div>
-              ))}
+              </div>
+
+              <div className="flex items-center border border-[#dde1e9] rounded-md overflow-hidden bg-white shadow-2xs">
+                <button
+                  onClick={handleZoomIn}
+                  title="Zoom In"
+                  className="p-1.5 text-[#6b7589] hover:bg-gray-100 hover:text-[#1a1d23] border-r border-[#dde1e9] transition-colors"
+                >
+                  <ZoomIn size={14} />
+                </button>
+                <button
+                  onClick={handleZoomOut}
+                  title="Zoom Out"
+                  className="p-1.5 text-[#6b7589] hover:bg-gray-100 hover:text-[#1a1d23] border-r border-[#dde1e9] transition-colors"
+                >
+                  <ZoomOut size={14} />
+                </button>
+                <button
+                  onClick={handleReset}
+                  title="Fit View"
+                  className="p-1.5 text-[#6b7589] hover:bg-gray-100 hover:text-[#1a1d23] flex items-center gap-1 text-xs px-2.5 font-medium transition-colors"
+                >
+                  <RotateCcw size={13} /> Fit View
+                </button>
+              </div>
+            </div>
+
+            {/* Permanent Graph Container with Overlays for Loading / Unavailable */}
+            <div className="relative w-full h-[620px] bg-[#f8fafc] overflow-hidden">
+              {/* Cytoscape mounts directly into this div */}
+              <div ref={containerRef} style={{ width: "100%", height: "100%" }} />
+
+              {/* Loading State Overlay */}
+              {loading && (
+                <div className="absolute inset-0 bg-[#f8fafc]/90 flex flex-col items-center justify-center gap-3 z-10">
+                  <Loader2 className="animate-spin text-[#1e3a5f]" size={30} />
+                  <span className="text-xs text-[#6b7589] font-medium">Loading dependency graph…</span>
+                </div>
+              )}
+
+              {/* Unavailable State Overlay */}
+              {!loading && (!available || elements.length === 0) && (
+                <div className="absolute inset-0 bg-white/95 flex flex-col items-center justify-center text-center p-8 z-10">
+                  <div className="mx-auto w-12 h-12 bg-gray-100 rounded-full flex items-center justify-center mb-3">
+                    <Info className="text-gray-400 w-6 h-6" />
+                  </div>
+                  <h3 className="text-base font-semibold text-gray-900">Dependency Impact: Unavailable</h3>
+                  <p className="text-xs text-gray-500 mt-1 max-w-sm">
+                    No verified dependency relationship is available from the current static-analysis evidence.
+                  </p>
+                </div>
+              )}
             </div>
           </div>
+
         </div>
 
       </div>

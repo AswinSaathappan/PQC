@@ -3,6 +3,9 @@ dist/
 build/
 .cache/
 .env*
+!.env.example
+backend/uploads/*
+!backend/uploads/.gitkeep
 .vite/
 vite.config.*.timestamp-*
 *.tsbuildinfo

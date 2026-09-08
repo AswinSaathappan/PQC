@@ -1,243 +1,591 @@
-import { useState } from "react";
-import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Cell } from "recharts";
-import { assetPriorities, applications, type AssetPriority } from "../data/mock";
+import React, { useState, useEffect, Fragment } from "react";
+import { ChevronDown, ChevronRight, Loader2, ShieldAlert, Layers } from "lucide-react";
+import axios from "axios";
 
-const urgencyColors: Record<string, string> = {
-  Urgent: "#c0392b",
-  Monitor: "#d97706",
-  Lower: "#0d7a6b",
-};
+interface GlobalAnalysis {
+  analysisId: string;
+  applicationName: string;
+  status?: string;
+}
 
-const urgencyBadge: Record<string, string> = {
-  Urgent: "bg-red-50 text-red-700 border border-red-200",
-  Monitor: "bg-amber-50 text-amber-700 border border-amber-200",
-  Lower: "bg-emerald-50 text-emerald-700 border border-emerald-200",
-};
+interface ScoredApplication {
+  analysisId: string;
+  applicationName: string;
+  assetCount: number;
+  detectedCryptoAssetCount: number;
+  moscaUrgencyScore: number;
+  dataSensitivityScore: number;
+  businessCriticalityScore: number;
+  dataProtectionDuration: number; // X
+  migrationDuration: number;      // Y
+  threatHorizonYear: number;
+  quantumRiskHorizon: number;     // Z
+  timingMargin: number;
+  priorityScore: number;          // APS
+  priorityClassification: string; // High / Medium / Low / Minimal
+}
+
+interface ScoredAsset {
+  assetId: string;
+  assetName: string;
+  algorithm: string;
+  assetType: string;
+  primitive: string;
+  location: string;
+  locations: string[];
+  occurrencesCount: number;
+  occurrences: { location: string; line?: number }[];
+  scores: {
+    quantumRisk: number | null;
+    quantumRiskClassification: string;
+    quantumRiskText: string;
+    quantumRiskReason: string;
+    dependencyImpact: number | null;
+    dependencyImpactText: string;
+    dependencyReach: number;
+    directDependents: number;
+    directDependentsList: string[];
+    transitiveDependents: number;
+    transitiveDependentsList: string[];
+    affectedComponents: number;
+    totalComponents: number;
+    hasDependencyEvidence: boolean;
+    dependencyCalculation: string;
+    priorityScore: number | null;
+    isPartial: boolean;
+    priorityClassification: string;
+    action: string;
+    isUnknown: boolean;
+    isNotApplicable: boolean;
+  };
+}
 
 const rankBadge: Record<number, string> = {
   1: "bg-red-100 text-red-800 border border-red-300",
   2: "bg-orange-50 text-orange-700 border border-orange-200",
   3: "bg-amber-50 text-amber-700 border border-amber-200",
-  4: "bg-slate-50 text-slate-600 border border-slate-200",
+  4: "bg-blue-50 text-blue-700 border border-blue-200",
+  5: "bg-slate-100 text-slate-700 border border-slate-200",
 };
 
-export default function PriorityAnalysis() {
-  const [selectedAppIdx, setSelectedAppIdx] = useState(0);
-  const [selectedAssetIdx, setSelectedAssetIdx] = useState(0);
+const urgencyBadge: Record<string, string> = {
+  Urgent: "bg-red-50 text-red-700 border border-red-200",
+  High: "bg-orange-50 text-orange-700 border border-orange-200",
+  Monitor: "bg-amber-50 text-amber-700 border border-amber-200",
+  Low: "bg-emerald-50 text-emerald-700 border border-emerald-200",
+  Unavailable: "bg-slate-100 text-slate-500 border border-slate-200",
+};
 
-  const app = applications[selectedAppIdx];
-  const assets: AssetPriority[] = assetPriorities[app.id] ?? [];
-  const sel = assets[selectedAssetIdx];
+const apsBadge: Record<string, string> = {
+  High: "bg-red-50 text-red-700 border border-red-200 font-bold",
+  Medium: "bg-amber-50 text-amber-700 border border-amber-200 font-bold",
+  Low: "bg-blue-50 text-blue-700 border border-blue-200 font-bold",
+  Minimal: "bg-slate-100 text-slate-600 border border-slate-200 font-bold",
+};
 
-  const barData = assets.map(a => ({
-    name: a.asset,
-    score: a.score,
-    fill: urgencyColors[a.urgency],
-    urgency: a.urgency,
-  }));
+interface Props {
+  selectedAnalysisId?: string;
+  onSelectAnalysis?: (id: string) => void;
+  analyses?: GlobalAnalysis[];
+}
+
+export default function PriorityAnalysis({ selectedAnalysisId, onSelectAnalysis, analyses = [] }: Props) {
+  const [scoredApps, setScoredApps] = useState<ScoredApplication[]>([]);
+  const [assets, setAssets] = useState<ScoredAsset[]>([]);
+  const [loading, setLoading] = useState<boolean>(true);
+  const [expandedRowIds, setExpandedRowIds] = useState<Set<string>>(new Set());
+
+  // Determine current active application ID
+  const effectiveAnalysisId = selectedAnalysisId || analyses[0]?.analysisId;
+
+  // 1. Fetch application-level scored data
+  useEffect(() => {
+    async function fetchApps() {
+      try {
+        const res = await axios.get("http://localhost:3001/api/analyses/scored/applications");
+        setScoredApps(res.data || []);
+      } catch (err) {
+        console.error("Failed to load scored applications", err);
+      }
+    }
+    fetchApps();
+  }, []);
+
+  // 2. Fetch component assets whenever selected application changes
+  useEffect(() => {
+    let isCancelled = false;
+
+    async function fetchAssets() {
+      if (!effectiveAnalysisId) {
+        if (!isCancelled) {
+          setAssets([]);
+          setLoading(false);
+        }
+        return;
+      }
+
+      setLoading(true);
+      // Clear previous application's table immediately
+      setAssets([]);
+      setExpandedRowIds(new Set());
+
+      try {
+        const res = await axios.get(`http://localhost:3001/api/analyses/${effectiveAnalysisId}/scored-assets`);
+        if (!isCancelled) {
+          setAssets(res.data || []);
+        }
+      } catch (err) {
+        console.error("Failed to load scored assets", err);
+        if (!isCancelled) {
+          setAssets([]);
+        }
+      } finally {
+        if (!isCancelled) {
+          setLoading(false);
+        }
+      }
+    }
+
+    fetchAssets();
+    return () => {
+      isCancelled = true;
+    };
+  }, [effectiveAnalysisId]);
+
+  // Active application metadata
+  const currentApp = scoredApps.find(a => a.analysisId === effectiveAnalysisId);
+  const fallbackApp = analyses.find(a => a.analysisId === effectiveAnalysisId);
+  const appDisplayName = currentApp?.applicationName || fallbackApp?.applicationName || "Application";
+
+  // Calculate occurrences summary
+  const uniqueAssetsCount = assets.length;
+  const cbomOccurrencesCount = assets.reduce((sum, a) => sum + (a.occurrencesCount || 1), 0);
+
+  const toggleRow = (id: string) => {
+    setExpandedRowIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
 
   return (
     <div className="flex-1 overflow-y-auto bg-[#f5f6f8]">
       <div className="max-w-[1320px] mx-auto px-6 py-6 space-y-5">
 
-        {/* Priority formula */}
-        <div className="bg-white border border-[#dde1e9] rounded-lg p-5">
-          <div className="text-[13px] font-semibold text-[#1a1d23] mb-3">Migration Priority Calculation</div>
-          <div className="flex items-center gap-2 flex-wrap mb-3">
-            {[
-              { label: "Quantum Risk", cls: "bg-red-50 border-red-200 text-red-700" },
-              "+",
-              { label: "Data Lifetime", cls: "bg-orange-50 border-orange-200 text-orange-700" },
-              "+",
-              { label: "Migration Complexity", cls: "bg-amber-50 border-amber-200 text-amber-700" },
-              "+",
-              { label: "Business Criticality", cls: "bg-blue-50 border-blue-200 text-blue-700" },
-              "+",
-              { label: "Dependency Impact", cls: "bg-slate-50 border-slate-200 text-slate-700" },
-              "=",
-              { label: "Priority Score", cls: "bg-[#1e3a5f] border-[#1e3a5f] text-white" },
-            ].map((item, i) => (
-              typeof item === "string"
-                ? <div key={i} className="text-[16px] font-bold text-[#dde1e9]">{item}</div>
-                : <div key={i} className={`text-[12px] font-semibold px-3 py-1.5 rounded-md border ${item.cls}`}>{item.label}</div>
-            ))}
+        {/* 1. Clean Header with Application Selector */}
+        <div className="bg-white border border-[#dde1e9] rounded-lg px-6 py-4 flex flex-wrap items-center justify-between gap-4 shadow-sm">
+          <div>
+            <h1 className="text-xl font-bold text-[#1e3a5f]">Priority Analysis</h1>
+            <p className="text-sm text-[#6b7589] mt-0.5">
+              Enterprise cryptographic migration priority based on Mosca timing urgency and component risk.
+            </p>
           </div>
-          <p className="text-[11px] text-[#6b7589]">
-            Priority ranking is applied to cryptographic assets <span className="font-semibold text-[#1a1d23]">within the selected application</span> — not across applications. Each application is analysed independently.
-          </p>
-        </div>
 
-        {/* Application selector */}
-        <div className="bg-white border border-[#dde1e9] rounded-lg p-4">
-          <div className="text-[11px] font-semibold text-[#6b7589] uppercase tracking-wide mb-3">Select Application to Analyse</div>
-          <div className="flex gap-3">
-            {applications.map((a, i) => (
-              <button key={a.id} onClick={() => { setSelectedAppIdx(i); setSelectedAssetIdx(0); }}
-                className={`flex-1 text-left px-4 py-3 rounded-lg border transition-all ${
-                  selectedAppIdx === i
-                    ? "border-[#1e3a5f] bg-[#f0f4fa]"
-                    : "border-[#dde1e9] hover:border-[#1e3a5f]/40 hover:bg-[#f9fafb]"
-                }`}>
-                <div className={`text-[12px] font-bold mb-0.5 ${selectedAppIdx === i ? "text-[#1e3a5f]" : "text-[#1a1d23]"}`}>{a.name}</div>
-                <div className="text-[10px] text-[#6b7589]">{a.assets} cryptographic assets · {a.dataLifetimeLabel} data</div>
-              </button>
-            ))}
-          </div>
-        </div>
-
-        <div className="grid grid-cols-5 gap-4">
-          {/* Ranked bar chart */}
-          <div className="col-span-3 bg-white border border-[#dde1e9] rounded-lg p-5">
-            <div className="text-[13px] font-semibold text-[#1a1d23] mb-0.5">
-              Cryptographic Asset Priority — {app.name}
-            </div>
-            <div className="text-[11px] text-[#6b7589] mb-4">Click a bar to view detailed factor breakdown</div>
-            <ResponsiveContainer width="100%" height={224}>
-              <BarChart
-                data={barData}
-                layout="vertical"
-                barSize={20}
-                onClick={(d: any) => {
-                  if (d?.activePayload) {
-                    const idx = assets.findIndex(a => a.asset === d.activePayload[0].payload.name);
-                    if (idx >= 0) setSelectedAssetIdx(idx);
-                  }
-                }}
+          <div className="flex items-center gap-3">
+            <span className="text-xs text-[#6b7589] font-medium uppercase tracking-wider">Application:</span>
+            <div className="relative">
+              <select
+                value={effectiveAnalysisId || ""}
+                onChange={(e) => onSelectAnalysis && onSelectAnalysis(e.target.value)}
+                className="appearance-none bg-[#f8fafc] border border-[#dde1e9] text-[#1a1d23] text-xs font-semibold py-2 pl-3 pr-8 rounded-md outline-none focus:border-[#1e3a5f] cursor-pointer min-w-[200px]"
               >
-                <CartesianGrid strokeDasharray="3 3" stroke="#f0f2f5" horizontal={false} />
-                <XAxis type="number" domain={[0, 100]} tick={{ fontSize: 10, fill: "#9aa1b1" }} axisLine={false} tickLine={false} />
-                <YAxis type="category" dataKey="name" width={120} tick={{ fontSize: 11, fill: "#6b7589" }} axisLine={false} tickLine={false} />
-                <Tooltip
-                  contentStyle={{ fontSize: 12, borderColor: "#dde1e9", borderRadius: 6 }}
-                  formatter={(v) => [v, "Priority Score"]}
-                  labelFormatter={(l, p) => p[0]?.payload?.name ?? l}
-                />
-                <Bar dataKey="score" radius={[0, 4, 4, 0]}>
-                  {barData.map((d, i) => <Cell key={i} fill={d.fill} />)}
-                </Bar>
-              </BarChart>
-            </ResponsiveContainer>
-
-            {/* Asset selector tabs */}
-            <div className="mt-4 pt-3 border-t border-[#f0f2f5]">
-              <div className="text-[10px] text-[#6b7589] mb-2 font-medium">Select asset:</div>
-              <div className="flex flex-wrap gap-1.5">
-                {assets.map((a, i) => (
-                  <button key={i} onClick={() => setSelectedAssetIdx(i)}
-                    className={`text-[10px] px-2.5 py-0.5 rounded font-medium border transition-colors ${
-                      selectedAssetIdx === i ? "bg-[#1e3a5f] text-white border-[#1e3a5f]" : "bg-[#f5f6f8] text-[#6b7589] border-[#dde1e9] hover:border-[#1e3a5f]/40"
-                    }`}>
-                    {a.asset}
-                  </button>
+                {analyses.length === 0 && <option value="">No applications found</option>}
+                {analyses.map(a => (
+                  <option key={a.analysisId} value={a.analysisId}>
+                    {a.applicationName}
+                  </option>
                 ))}
+              </select>
+              <ChevronDown size={14} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[#6b7589] pointer-events-none" />
+            </div>
+          </div>
+        </div>
+
+        {/* 2. Application Priority Context (Read-Only) */}
+        {currentApp && (
+          <div className="bg-white border border-[#dde1e9] rounded-lg p-5 shadow-sm">
+            <div className="flex items-center justify-between pb-3 mb-4 border-b border-[#dde1e9]">
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-bold uppercase tracking-wider text-[#6b7589]">Application Priority Context</span>
+                <span className="text-xs font-semibold text-[#1e3a5f] bg-blue-50 px-2.5 py-0.5 rounded border border-blue-200">
+                  {currentApp.applicationName}
+                </span>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-[#6b7589]">Final Application Priority:</span>
+                <span className={`text-xs px-2.5 py-0.5 rounded-full border ${apsBadge[currentApp.priorityClassification] || apsBadge.Minimal}`}>
+                  {currentApp.priorityClassification} ({currentApp.priorityScore.toFixed(1)})
+                </span>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 text-xs">
+              <div className="bg-[#f8fafc] border border-[#dde1e9] rounded-md p-3">
+                <div className="text-[10px] uppercase font-bold text-[#6b7589]">Protection Duration (X)</div>
+                <div className="text-sm font-bold text-[#1a1d23] mt-1">{currentApp.dataProtectionDuration} years</div>
+              </div>
+
+              <div className="bg-[#f8fafc] border border-[#dde1e9] rounded-md p-3">
+                <div className="text-[10px] uppercase font-bold text-[#6b7589]">Migration Duration (Y)</div>
+                <div className="text-sm font-bold text-[#1a1d23] mt-1">{currentApp.migrationDuration} years</div>
+              </div>
+
+              <div className="bg-[#f8fafc] border border-[#dde1e9] rounded-md p-3">
+                <div className="text-[10px] uppercase font-bold text-[#6b7589]">Risk Horizon (Z)</div>
+                <div className="text-sm font-bold text-[#1a1d23] mt-1">{currentApp.quantumRiskHorizon} years</div>
+                <div className="text-[10px] text-[#6b7589] mt-0.5">Year {currentApp.threatHorizonYear}</div>
+              </div>
+
+              <div className="bg-[#f8fafc] border border-[#dde1e9] rounded-md p-3">
+                <div className="text-[10px] uppercase font-bold text-[#6b7589]">Timing Margin</div>
+                <div className={`text-sm font-bold mt-1 ${currentApp.timingMargin <= 0 ? 'text-red-600' : 'text-[#1e3a5f]'}`}>
+                  {currentApp.timingMargin} years
+                </div>
+                <div className="text-[10px] text-[#6b7589] mt-0.5">Z - (X + Y)</div>
+              </div>
+
+              <div className="bg-[#f8fafc] border border-[#dde1e9] rounded-md p-3">
+                <div className="text-[10px] uppercase font-bold text-[#6b7589]">Mosca Urgency Score</div>
+                <div className="text-sm font-bold text-[#1a1d23] mt-1">{currentApp.moscaUrgencyScore} / 100</div>
+                <div className="text-[10px] text-[#6b7589] mt-0.5">
+                  {currentApp.timingMargin <= 0 ? 'Critical' : currentApp.timingMargin <= 2 ? 'Very High' : currentApp.timingMargin <= 5 ? 'High' : currentApp.timingMargin <= 10 ? 'Medium' : 'Low'}
+                </div>
+              </div>
+
+              <div className="bg-[#f8fafc] border border-[#dde1e9] rounded-md p-3">
+                <div className="text-[10px] uppercase font-bold text-[#6b7589]">App Priority Score (APS)</div>
+                <div className="text-sm font-bold text-[#1e3a5f] mt-1">{currentApp.priorityScore.toFixed(1)}</div>
+                <div className="text-[10px] text-[#6b7589] mt-0.5">(Mosca + Sens + Crit) / 3</div>
               </div>
             </div>
           </div>
+        )}
 
-          {/* Explanation panel */}
-          {sel && (
-            <div className="col-span-2 bg-white border border-[#dde1e9] rounded-lg p-5">
-              <div className="text-[10px] text-[#6b7589] uppercase tracking-wide font-medium mb-1">Cryptographic Asset</div>
-              <div className="text-[14px] font-bold text-[#1a1d23] mb-0.5">{sel.asset}</div>
-              <div className="text-[11px] text-[#6b7589] mb-3">{sel.component}</div>
-
-              <div className="flex items-center gap-2 mb-4">
-                <div className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${rankBadge[sel.rank]}`}>Migration Priority {sel.rank}</div>
-                <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full border ${urgencyBadge[sel.urgency]}`}>{sel.urgency}</span>
+        {/* 3. Priority Analysis Table */}
+        <div className="bg-white border border-[#dde1e9] rounded-lg shadow-sm overflow-hidden">
+          <div className="px-6 py-4 border-b border-[#dde1e9] flex flex-wrap items-center justify-between gap-2 bg-[#fafbfc]">
+            <div>
+              <div className="text-sm font-bold text-[#1a1d23]">
+                Component Priority Table — {appDisplayName}
               </div>
-
-              <div className="text-[11px] font-semibold text-[#1a1d23] mb-2">Factor Breakdown</div>
-              <div className="space-y-2 mb-4">
-                {[
-                  { label: "Quantum Risk", value: sel.quantumRisk, color: "bg-red-400" },
-                  { label: "Business Criticality", value: sel.criticality, color: "bg-orange-400" },
-                  { label: "Dependency Impact", value: sel.depImpact, color: "bg-blue-400" },
-                  { label: "Data Lifetime Exposure", value: sel.dataLifetime, color: "bg-amber-400" },
-                  { label: "Migration Complexity", value: sel.migrationComplexity, color: "bg-slate-400" },
-                ].map(item => (
-                  <div key={item.label}>
-                    <div className="flex justify-between text-[10px] mb-0.5">
-                      <span className="text-[#6b7589]">{item.label}</span>
-                      <span className="font-medium text-[#1a1d23]">{item.value}</span>
-                    </div>
-                    <div className="h-1.5 bg-[#eef0f3] rounded-full overflow-hidden">
-                      <div className={`h-full ${item.color} rounded-full`} style={{ width: `${item.value}%` }} />
-                    </div>
-                  </div>
-                ))}
+              <div className="text-xs font-semibold text-[#1e3a5f] mt-0.5">
+                {uniqueAssetsCount} unique assets • {cbomOccurrencesCount} CBOM occurrences
               </div>
+            </div>
+            <div className="text-[11px] text-[#6b7589]">
+              Click any row to view expandable calculation details
+            </div>
+          </div>
 
-              <div className="space-y-1 text-[11px] bg-[#f9fafb] border border-[#dde1e9] rounded-md p-3">
-                {[
-                  sel.quantumVuln ? "✓ Quantum-vulnerable algorithm (Shor's algorithm applicable)" : null,
-                  sel.dataLifetime >= 80 ? "✓ Long data protection lifetime — high exposure window" : null,
-                  sel.criticality >= 80 ? "✓ Critical or high business criticality system" : null,
-                  sel.depImpact >= 70 ? "✓ High dependency impact — migration affects downstream services" : null,
-                  sel.urgency === "Urgent" ? "✓ Migration urgency: Urgent — action recommended" : null,
-                ].filter(Boolean).map((reason, i) => (
-                  <div key={i} className="text-[#0d7a6b]">{reason}</div>
-                ))}
+          {loading ? (
+            <div className="p-16 flex flex-col items-center justify-center gap-3">
+              <Loader2 className="animate-spin text-[#1e3a5f]" size={32} />
+              <div className="text-xs text-[#6b7589]">Loading component priority data…</div>
+            </div>
+          ) : assets.length === 0 ? (
+            <div className="p-12 text-center">
+              <div className="w-12 h-12 rounded-full bg-blue-50 border border-blue-200 flex items-center justify-center mx-auto mb-3 text-[#1e3a5f]">
+                <ShieldAlert size={22} />
               </div>
+              <h3 className="text-sm font-bold text-[#1a1d23] mb-1">No Cryptographic Assets Detected</h3>
+              <p className="text-xs text-[#6b7589] max-w-sm mx-auto">
+                No cryptographic components were discovered for the selected application.
+              </p>
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[960px] text-xs">
+                <thead>
+                  <tr className="bg-[#f9fafb] border-b border-[#dde1e9] text-[11px] font-semibold text-[#6b7589] uppercase tracking-wider">
+                    <th className="py-3 px-4 text-left w-12">Rank</th>
+                    <th className="py-3 px-4 text-left">Cryptographic Asset</th>
+                    <th className="py-3 px-4 text-left">Type / Primitive</th>
+                    <th className="py-3 px-4 text-center w-24">Occurrences</th>
+                    <th className="py-3 px-4 text-left min-w-[200px]">Locations</th>
+                    <th className="py-3 px-4 text-left">Quantum Risk</th>
+                    <th className="py-3 px-4 text-left">Dependency Impact</th>
+                    <th className="py-3 px-4 text-left">CPS</th>
+                    <th className="py-3 px-4 text-left">Priority</th>
+                    <th className="py-3 px-4 text-left">Action</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-[#dde1e9]">
+                  {assets.map((a, idx) => {
+                    const isExpanded = expandedRowIds.has(a.assetId);
+                    const rankNum = idx + 1;
+                    const qRiskText = a.scores.quantumRiskText;
+                    const depImpactText = a.scores.dependencyImpactText;
+                    const isUnavailable = a.scores.priorityScore === null;
+                    const isPartial = a.scores.isPartial;
+
+                    const locs = a.locations && a.locations.length > 0 ? a.locations : [a.location || "N/A"];
+                    const visibleLocs = locs.slice(0, 2);
+                    const remainingLocsCount = locs.length - visibleLocs.length;
+
+                    return (
+                      <Fragment key={a.assetId || idx}>
+                        <tr
+                          onClick={() => toggleRow(a.assetId)}
+                          className={`hover:bg-blue-50/40 cursor-pointer transition-colors ${
+                            isExpanded ? "bg-blue-50/30" : ""
+                          }`}
+                        >
+                          {/* Rank */}
+                          <td className="py-3 px-4 whitespace-nowrap">
+                            <div className="flex items-center gap-1.5">
+                              {isExpanded ? (
+                                <ChevronDown size={14} className="text-[#1e3a5f]" />
+                              ) : (
+                                <ChevronRight size={14} className="text-gray-400" />
+                              )}
+                              <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border inline-block ${rankBadge[rankNum] || rankBadge[5]}`}>
+                                {isUnavailable ? "—" : `P${rankNum}`}
+                              </span>
+                            </div>
+                          </td>
+
+                          {/* Cryptographic Asset */}
+                          <td className="py-3 px-4">
+                            <div className="font-bold text-[#1e3a5f] text-[13px]">{a.assetName}</div>
+                          </td>
+
+                          {/* Type / Primitive */}
+                          <td className="py-3 px-4 whitespace-nowrap text-gray-700">
+                            <div className="capitalize font-medium text-xs text-gray-800">{a.assetType?.replace(/-/g, ' ')}</div>
+                            <div className="text-[10px] text-[#6b7589] uppercase tracking-wider font-mono">{a.primitive}</div>
+                          </td>
+
+                          {/* Occurrences */}
+                          <td className="py-3 px-4 text-center">
+                            <span className="inline-flex items-center justify-center px-2 py-0.5 bg-blue-50 text-[#1e3a5f] font-bold rounded text-xs border border-blue-100">
+                              {a.occurrencesCount}
+                            </span>
+                          </td>
+
+                          {/* Locations */}
+                          <td className="py-3 px-4 font-mono text-[11px] text-gray-700">
+                            <div className="space-y-0.5">
+                              {visibleLocs.map((loc, lIdx) => (
+                                <div key={lIdx} className="truncate max-w-[220px]" title={loc}>
+                                  • {loc}
+                                </div>
+                              ))}
+                              {remainingLocsCount > 0 && (
+                                <div className="text-[10px] text-blue-600 font-sans font-semibold">
+                                  +{remainingLocsCount} more (click to view)
+                                </div>
+                              )}
+                            </div>
+                          </td>
+
+                          {/* Quantum Risk */}
+                          <td className="py-3 px-4 whitespace-nowrap">
+                            <span className={`font-semibold ${
+                              a.scores.quantumRisk === 100 ? 'text-red-700' :
+                              a.scores.quantumRisk === 60 ? 'text-amber-700' :
+                              (a.scores.quantumRisk === 20 || a.scores.quantumRisk === 15 || a.scores.quantumRisk === 10) ? 'text-emerald-700' : 'text-gray-500'
+                            }`}>
+                              {qRiskText}
+                            </span>
+                          </td>
+
+                          {/* Dependency Impact */}
+                          <td className="py-3 px-4 whitespace-nowrap">
+                            <span className={`font-semibold ${
+                              a.scores.dependencyImpact !== null ? 'text-[#1e3a5f]' : 'text-gray-500 italic'
+                            }`}>
+                              {depImpactText}
+                            </span>
+                          </td>
+
+                          {/* CPS */}
+                          <td className="py-3 px-4">
+                            {isUnavailable ? (
+                              <span className="text-[10px] text-gray-400 italic">Unavailable</span>
+                            ) : (
+                              <div>
+                                <span className="font-bold text-[#1a1d23] text-sm">
+                                  {a.scores.priorityScore?.toFixed(1)}
+                                </span>
+                                {isPartial && (
+                                  <div className="text-[9px] text-amber-700 font-medium">
+                                    Partial CPS — based on available evidence
+                                  </div>
+                                )}
+                              </div>
+                            )}
+                          </td>
+
+                          {/* Priority */}
+                          <td className="py-3 px-4 whitespace-nowrap">
+                            <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full border ${urgencyBadge[a.scores.priorityClassification] || urgencyBadge.Unavailable}`}>
+                              {a.scores.priorityClassification}
+                            </span>
+                          </td>
+
+                          {/* Action */}
+                          <td className="py-3 px-4 font-medium text-[#1a1d23] whitespace-nowrap">
+                            {a.scores.action}
+                          </td>
+                        </tr>
+
+                        {/* 4. Expandable Calculation Details */}
+                        {isExpanded && (
+                          <tr className="bg-[#f8fafc] border-b border-[#dde1e9]">
+                            <td colSpan={10} className="p-5">
+                              <div className="bg-white border border-[#dde1e9] rounded-lg p-5 shadow-2xs space-y-4">
+                                
+                                <div className="flex items-center justify-between pb-2 border-b border-[#dde1e9]">
+                                  <div className="font-bold text-sm text-[#1e3a5f] flex items-center gap-2">
+                                    <Layers size={16} /> Detailed Calculation & Evidence — {a.assetName}
+                                  </div>
+                                  <div className="text-[11px] text-[#6b7589]">
+                                    {a.occurrencesCount} {a.occurrencesCount === 1 ? 'occurrence' : 'occurrences'} across {locs.length} {locs.length === 1 ? 'location' : 'locations'}
+                                  </div>
+                                </div>
+
+                                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                                  
+                                  {/* Section A: Quantum Risk */}
+                                  <div className="border border-[#dde1e9] rounded-md p-4 bg-[#fcfdfe] flex flex-col justify-between">
+                                    <div>
+                                      <div className="text-[10px] font-bold uppercase tracking-wider text-red-700 mb-2">
+                                        Quantum Risk
+                                      </div>
+                                      <div className="space-y-1.5 text-xs">
+                                        <div className="flex justify-between">
+                                          <span className="text-[#6b7589]">Classification:</span>
+                                          <span className="font-bold text-[#1a1d23]">{a.scores.quantumRiskClassification}</span>
+                                        </div>
+                                        <div className="flex justify-between">
+                                          <span className="text-[#6b7589]">Score:</span>
+                                          <span className="font-bold text-[#1a1d23]">
+                                            {a.scores.quantumRisk !== null ? a.scores.quantumRisk : "Unavailable"}
+                                          </span>
+                                        </div>
+                                      </div>
+                                    </div>
+                                    <div className="mt-3 pt-2 border-t border-gray-100 text-[11px] text-[#6b7589] leading-relaxed">
+                                      <span className="font-semibold text-gray-700 block mb-0.5">Reason:</span>
+                                      {a.scores.quantumRiskReason || `${a.assetName} evaluated against quantum risk criteria.`}
+                                    </div>
+                                  </div>
+
+                                  {/* Section B: Dependency Impact */}
+                                  <div className="border border-[#dde1e9] rounded-md p-4 bg-[#fcfdfe] flex flex-col justify-between">
+                                    <div>
+                                      <div className="text-[10px] font-bold uppercase tracking-wider text-blue-700 mb-2">
+                                        Dependency Impact
+                                      </div>
+                                      {a.scores.hasDependencyEvidence ? (
+                                        <div className="space-y-1.5 text-xs">
+                                          <div className="flex justify-between">
+                                            <span className="text-[#6b7589]">Direct dependencies:</span>
+                                            <span className="font-bold text-[#1a1d23]">{a.scores.directDependents}</span>
+                                          </div>
+                                          <div className="flex justify-between">
+                                            <span className="text-[#6b7589]">Transitive dependencies:</span>
+                                            <span className="font-bold text-[#1a1d23]">{a.scores.transitiveDependents}</span>
+                                          </div>
+                                          <div className="flex justify-between">
+                                            <span className="text-[#6b7589]">Dependency Reach:</span>
+                                            <span className="font-bold text-[#1a1d23]">{a.scores.dependencyReach}%</span>
+                                          </div>
+                                          <div className="flex justify-between">
+                                            <span className="text-[#6b7589]">Dependency Impact Score:</span>
+                                            <span className="font-bold text-[#1e3a5f]">{a.scores.dependencyImpact}</span>
+                                          </div>
+                                        </div>
+                                      ) : (
+                                        <div className="text-[11px] text-gray-500 italic p-2 bg-gray-50 border border-gray-200 rounded">
+                                          Dependency impact could not be calculated because dependency relationship evidence is unavailable.
+                                        </div>
+                                      )}
+                                    </div>
+                                    <div className="mt-3 pt-2 border-t border-gray-100 text-[11px] text-[#6b7589]">
+                                      <span className="font-semibold text-gray-700 block mb-0.5">Calculation:</span>
+                                      <span className="font-mono text-gray-800 text-[10px]">
+                                        {a.scores.dependencyCalculation}
+                                      </span>
+                                    </div>
+                                  </div>
+
+                                  {/* Section C: Component Priority */}
+                                  <div className="border border-[#dde1e9] rounded-md p-4 bg-[#fcfdfe] flex flex-col justify-between">
+                                    <div>
+                                      <div className="text-[10px] font-bold uppercase tracking-wider text-[#1e3a5f] mb-2">
+                                        Component Priority
+                                      </div>
+                                      <div className="space-y-1.5 text-xs">
+                                        <div className="flex justify-between">
+                                          <span className="text-[#6b7589]">Quantum Risk Score:</span>
+                                          <span className="font-bold text-[#1a1d23]">
+                                            {a.scores.quantumRisk !== null ? a.scores.quantumRisk : "Unavailable"}
+                                          </span>
+                                        </div>
+                                        <div className="flex justify-between">
+                                          <span className="text-[#6b7589]">Dependency Impact Score:</span>
+                                          <span className="font-bold text-[#1a1d23]">
+                                            {a.scores.dependencyImpact !== null ? a.scores.dependencyImpact : "Unavailable"}
+                                          </span>
+                                        </div>
+                                        <div className="flex justify-between pt-1 border-t border-gray-100">
+                                          <span className="text-[#6b7589]">Priority:</span>
+                                          <span className="font-bold text-[#1e3a5f]">{a.scores.priorityClassification}</span>
+                                        </div>
+                                        <div className="flex justify-between">
+                                          <span className="text-[#6b7589]">Action:</span>
+                                          <span className="font-bold text-[#1e3a5f]">{a.scores.action}</span>
+                                        </div>
+                                      </div>
+                                    </div>
+                                    <div className="mt-3 pt-2 border-t border-gray-100 text-[11px]">
+                                      <span className="font-semibold text-gray-700 block mb-0.5">CPS Formula:</span>
+                                      {a.scores.quantumRisk !== null && a.scores.dependencyImpact !== null ? (
+                                        <div className="p-1.5 bg-blue-50 border border-blue-100 rounded font-mono text-[10px] text-blue-900">
+                                          CPS = ({a.scores.quantumRisk} + {a.scores.dependencyImpact}) / 2 = {a.scores.priorityScore?.toFixed(1)}
+                                        </div>
+                                      ) : a.scores.priorityScore !== null ? (
+                                        <div className="p-1.5 bg-amber-50 border border-amber-100 rounded font-mono text-[10px] text-amber-900">
+                                          CPS = {a.scores.priorityScore} (Partial CPS — based on available evidence)
+                                        </div>
+                                      ) : (
+                                        <div className="p-1.5 bg-gray-50 border border-gray-200 rounded font-mono text-[10px] text-gray-600">
+                                          CPS = Unavailable
+                                        </div>
+                                      )}
+                                    </div>
+                                  </div>
+
+                                </div>
+
+                                {/* Complete Locations List */}
+                                <div className="pt-2 border-t border-[#dde1e9]">
+                                  <div className="text-[11px] font-semibold text-gray-700 mb-1.5">
+                                    All Detection Locations ({locs.length}):
+                                  </div>
+                                  <div className="flex flex-wrap gap-1.5">
+                                    {locs.map((loc, idx) => (
+                                      <span key={idx} className="font-mono text-[11px] bg-[#f8fafc] border border-[#dde1e9] px-2 py-0.5 rounded text-gray-700">
+                                        {loc}
+                                      </span>
+                                    ))}
+                                  </div>
+                                </div>
+
+                              </div>
+                            </td>
+                          </tr>
+                        )}
+                      </Fragment>
+                    );
+                  })}
+                </tbody>
+              </table>
             </div>
           )}
-        </div>
-
-        {/* Asset table */}
-        <div className="bg-white border border-[#dde1e9] rounded-lg">
-          <div className="px-5 py-4 border-b border-[#dde1e9]">
-            <div className="text-[13px] font-semibold text-[#1a1d23]">Migration Priority Table — {app.name}</div>
-            <div className="text-[11px] text-[#6b7589] mt-0.5">Cryptographic assets ranked by combined migration urgency score within this application</div>
-          </div>
-          <table className="w-full">
-            <thead>
-              <tr className="border-b border-[#dde1e9] bg-[#f9fafb]">
-                {["Rank", "Cryptographic Asset", "Component", "Quantum Risk", "Data Lifetime", "Criticality", "Dep. Impact", "Score", "Action"].map(h => (
-                  <th key={h} className="px-4 py-2.5 text-left text-[10px] font-semibold text-[#6b7589] uppercase tracking-wide whitespace-nowrap">{h}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {assets.map((a, i) => (
-                <tr key={i}
-                  onClick={() => setSelectedAssetIdx(i)}
-                  className={`border-b border-[#f0f2f5] cursor-pointer transition-colors ${selectedAssetIdx === i ? "bg-blue-50/50" : "hover:bg-blue-50/30"}`}>
-                  <td className="px-4 py-3">
-                    <div className={`text-[10px] font-bold px-2 py-0.5 rounded-full border inline-block ${rankBadge[a.rank]}`}>P{a.rank}</div>
-                  </td>
-                  <td className="px-4 py-3">
-                    <div className="text-[12px] font-bold text-[#1e3a5f]">{a.asset}</div>
-                  </td>
-                  <td className="px-4 py-3 text-[11px] text-[#6b7589]">{a.component}</td>
-                  <td className="px-4 py-3">
-                    <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full border ${a.quantumRisk >= 80 ? "bg-red-50 text-red-700 border-red-200" : "bg-amber-50 text-amber-700 border-amber-200"}`}>
-                      {a.quantumRisk >= 80 ? "High" : "Medium"}
-                    </span>
-                  </td>
-                  <td className="px-4 py-3 text-[11px] font-medium text-[#1a1d23]">{app.dataLifetimeLabel}</td>
-                  <td className="px-4 py-3 text-[11px] font-medium text-[#1a1d23]">{app.criticality}</td>
-                  <td className="px-4 py-3">
-                    <div className="flex items-center gap-2">
-                      <div className="w-14 h-1.5 bg-[#eef0f3] rounded-full overflow-hidden">
-                        <div className="h-full rounded-full bg-[#1e3a5f]/60" style={{ width: `${a.depImpact}%` }} />
-                      </div>
-                      <span className="text-[11px] font-medium text-[#1a1d23]">{a.depImpact}</span>
-                    </div>
-                  </td>
-                  <td className="px-4 py-3">
-                    <div className="flex items-center gap-2">
-                      <div className="w-14 h-1.5 bg-[#eef0f3] rounded-full overflow-hidden">
-                        <div className="h-full rounded-full" style={{ width: `${a.score}%`, backgroundColor: urgencyColors[a.urgency] }} />
-                      </div>
-                      <span className="text-[12px] font-bold text-[#1a1d23]">{a.score}</span>
-                    </div>
-                  </td>
-                  <td className="px-4 py-3">
-                    <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full border ${urgencyBadge[a.urgency]}`}>{a.urgency}</span>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
         </div>
 
       </div>

@@ -1,125 +1,251 @@
-import { useState } from "react";
-import { Search, Download, CheckCircle } from "lucide-react";
-import { discoveryFindings, applications } from "../data/mock";
+import React, { useState, useEffect } from "react";
+import { Search, Download, ChevronRight, ChevronDown } from "lucide-react";
 
-const confBadge: Record<string, string> = {
-  High: "bg-emerald-50 text-emerald-700 border border-emerald-200",
-  Medium: "bg-amber-50 text-amber-700 border border-amber-200",
-  Low: "bg-slate-100 text-slate-600 border border-slate-200",
-};
+interface Props {
+  selectedAnalysisId?: string;
+  analyses?: any[];
+  onSelectAnalysis?: (id: string) => void;
+}
 
-const sourceStats = [
-  { label: "Source Code", count: 1240, found: 423 },
-  { label: "Binaries", count: 34, found: 187 },
-  { label: "Libraries", count: 89, found: 388 },
-  { label: "Container Images", count: 12, found: 328 },
-  { label: "Dependencies", count: 312, found: 521 },
-];
-
-const artefactTypes = ["Algorithms", "Keys", "Certificates", "Protocols", "Crypto Libraries", "HSMs", "Cloud Crypto Services"];
-
-export default function Discovery() {
+export default function Discovery({ selectedAnalysisId: propSelectedId, analyses: propAnalyses = [], onSelectAnalysis }: Props) {
   const [search, setSearch] = useState("");
-  const [appFilter, setAppFilter] = useState("All Applications");
-  const [typeFilter, setTypeFilter] = useState("All Types");
+  const [localAnalyses, setLocalAnalyses] = useState<any[]>([]);
+  const [localSelectedId, setLocalSelectedId] = useState<string>("");
+  const [assets, setAssets] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set());
 
-  const appOptions = ["All Applications", ...applications.map(a => a.name)];
-  const typeOptions = ["All Types", "Algorithm", "Crypto Library", "Protocol"];
+  const analysesList = propAnalyses.length > 0 ? propAnalyses : localAnalyses;
+  const activeSelectedId = propSelectedId || localSelectedId || (analysesList[0]?.analysisId ?? "");
 
-  const filtered = discoveryFindings.filter(f => {
-    const matchSearch = !search || f.artefact.toLowerCase().includes(search.toLowerCase()) || f.algorithm.toLowerCase().includes(search.toLowerCase()) || f.app.toLowerCase().includes(search.toLowerCase());
-    const matchApp = appFilter === "All Applications" || f.app === appFilter;
-    const matchType = typeFilter === "All Types" || f.type === typeFilter;
-    return matchSearch && matchApp && matchType;
+  useEffect(() => {
+    if (propAnalyses.length === 0) {
+      fetch("http://localhost:3001/api/analyses")
+        .then(r => r.ok ? r.json() : [])
+        .then(data => {
+          setLocalAnalyses(data);
+          if (data.length > 0 && !propSelectedId) setLocalSelectedId(data[0].analysisId);
+        })
+        .catch(() => {});
+    }
+  }, [propAnalyses.length, propSelectedId]);
+
+  useEffect(() => {
+    if (!activeSelectedId) { setLoading(false); return; }
+    setLoading(true);
+    setExpandedRows(new Set());
+    fetch(`http://localhost:3001/api/analyses/${activeSelectedId}/assets`)
+      .then(r => r.ok ? r.json() : [])
+      .then(data => { setAssets(data); setLoading(false); })
+      .catch(() => { setAssets([]); setLoading(false); });
+  }, [activeSelectedId]);
+
+  const filtered = assets.filter(a => {
+    if (!search) return true;
+    const q = search.toLowerCase();
+    return (
+      a.assetName?.toLowerCase().includes(q) ||
+      a.assetType?.toLowerCase().includes(q) ||
+      a.primitive?.toLowerCase().includes(q) ||
+      a.location?.toLowerCase().includes(q)
+    );
   });
+
+  const toggleRow = (id: string) => {
+    const s = new Set(expandedRows);
+    s.has(id) ? s.delete(id) : s.add(id);
+    setExpandedRows(s);
+  };
+
+  const displayPrimitive = (p: string | null | undefined) => {
+    if (!p) return "Unspecified";
+    const map: Record<string, string> = {
+      "block-cipher": "Block Cipher",
+      "hash": "Hash Function",
+      "pke": "Public Key Encryption",
+      "ae": "Authenticated Encryption",
+      "signature": "Digital Signature",
+      "mac": "MAC",
+      "dh": "Key Agreement",
+      "kdf": "Key Derivation",
+      "xof": "Extendable Output Function",
+      "pbkdf": "Password-Based KDF",
+    };
+    return map[p.toLowerCase()] ?? p;
+  };
+
+  const displayType = (t: string | null | undefined) => {
+    if (!t) return "-";
+    const map: Record<string, string> = {
+      "algorithm": "Algorithm",
+      "related-crypto-material": "Related Crypto Material",
+      "certificate": "Certificate",
+      "protocol": "Protocol",
+      "library": "Library",
+    };
+    return map[t.toLowerCase()] ?? t;
+  };
+
+  const handleExportCsv = () => {
+    const headers = ["Cryptographic Asset", "Type", "Primitive", "File", "Line", "Offset", "Reference", "Quantum Safety Status"];
+    const rows: string[][] = [];
+
+    assets.forEach(asset => {
+      const qStatus = asset.quantumSafe === true ? "Quantum Safe" : (asset.quantumSafe === false ? "Not Quantum Safe" : "Unknown");
+      const occurrences = asset.occurrences && asset.occurrences.length > 0 ? asset.occurrences : [{ location: asset.location }];
+      
+      occurrences.forEach((occ: any) => {
+        rows.push([
+          asset.assetName || asset.assetId || "",
+          displayType(asset.assetType),
+          displayPrimitive(asset.primitive),
+          occ.location || "",
+          occ.line ? occ.line.toString() : "",
+          occ.offset ? occ.offset.toString() : "",
+          occ.additionalContext || "",
+          qStatus
+        ]);
+      });
+    });
+
+    const csvContent = [
+      headers.join(","),
+      ...rows.map(r => r.map(cell => `"${(cell || "").replace(/"/g, '""')}"`).join(","))
+    ].join("\n");
+
+    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.setAttribute("download", `cbom-export-${selectedAnalysisId || 'all'}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
 
   return (
     <div className="flex-1 overflow-y-auto bg-[#f5f6f8]">
-      <div className="max-w-[1320px] mx-auto px-6 py-6 space-y-5">
+      <div className="max-w-[1320px] mx-auto px-6 py-6 space-y-4">
 
-        {/* Discovery sources */}
-        <div className="bg-white border border-[#dde1e9] rounded-lg p-5">
-          <div className="flex items-center justify-between mb-4">
-            <div>
-              <div className="text-[13px] font-semibold text-[#1a1d23]">Discovery Sources</div>
-              <div className="text-[11px] text-[#6b7589]">All sources scanned across 5 applications</div>
+        {/* Header */}
+        <div className="bg-white border border-[#dde1e9] rounded-lg px-5 py-4 flex items-center justify-between">
+          <div>
+            <div className="text-[15px] font-bold text-[#1a1d23]">Cryptographic Asset Discovery</div>
+            <div className="text-[12px] text-[#6b7589] mt-0.5">
+              Discovered cryptographic assets — sourced directly from scanner results
             </div>
-            <span className="flex items-center gap-1.5 text-[11px] text-emerald-700 bg-emerald-50 border border-emerald-200 px-2.5 py-1 rounded-full font-medium">
-              <CheckCircle size={12} /> Complete
-            </span>
           </div>
-          <div className="grid grid-cols-5 gap-3">
-            {sourceStats.map((s, i) => (
-              <div key={i} className="bg-[#f5f6f8] rounded-md p-3">
-                <div className="text-[10px] text-[#6b7589] font-medium mb-1">{s.label}</div>
-                <div className="text-xl font-bold text-[#1e3a5f]">{s.found}</div>
-                <div className="text-[10px] text-[#6b7589]">{s.count} files scanned</div>
-              </div>
-            ))}
-          </div>
-        </div>
-
-        {/* Artefact types */}
-        <div className="bg-white border border-[#dde1e9] rounded-lg p-4">
-          <div className="text-[11px] text-[#6b7589] font-medium uppercase tracking-wide mb-3">Discovered Artefact Categories</div>
-          <div className="flex gap-2 flex-wrap">
-            {artefactTypes.map(t => (
-              <span key={t} className="text-[11px] bg-[#f5f6f8] border border-[#dde1e9] text-[#1a1d23] px-3 py-1 rounded-full font-medium">{t}</span>
-            ))}
+          <div className="flex items-center gap-3">
+            <span className="text-[12px] text-gray-600 font-medium">Application:</span>
+            <select
+              value={activeSelectedId}
+              onChange={e => {
+                const val = e.target.value;
+                setLocalSelectedId(val);
+                if (onSelectAnalysis) onSelectAnalysis(val);
+              }}
+              className="text-[12px] border border-[#dde1e9] rounded-md px-3 py-1.5 bg-white outline-none text-[#1a1d23] font-medium min-w-[220px]"
+            >
+              {analysesList.length === 0 && <option value="">No applications found</option>}
+              {analysesList.map(a => (
+                <option key={a.analysisId} value={a.analysisId}>{a.applicationName}</option>
+              ))}
+            </select>
           </div>
         </div>
 
-        {/* Findings table */}
-        <div className="bg-white border border-[#dde1e9] rounded-lg">
-          <div className="px-5 py-4 border-b border-[#dde1e9] flex items-center gap-3">
+        {/* Table Card */}
+        <div className="bg-white border border-[#dde1e9] rounded-lg overflow-hidden">
+          {/* Table toolbar */}
+          <div className="px-5 py-3 border-b border-[#dde1e9] flex items-center gap-3 bg-white">
             <div className="flex-1">
-              <div className="text-[13px] font-semibold text-[#1a1d23]">Discovery Findings</div>
-              <div className="text-[11px] text-[#6b7589]">{filtered.length} artefacts</div>
+              <span className="text-[13px] font-semibold text-[#1a1d23]">
+                Cryptographic Assets ({loading ? "…" : filtered.length})
+              </span>
             </div>
-            <div className="flex items-center gap-1.5 bg-[#f5f6f8] border border-[#dde1e9] rounded-md px-3 py-1.5 w-44">
-              <Search size={12} className="text-[#6b7589]" />
-              <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search artefacts..." className="bg-transparent text-[12px] outline-none flex-1 placeholder-[#9aa1b1]" />
+            <div className="flex items-center gap-1.5 bg-[#f5f6f8] border border-[#dde1e9] rounded-md px-3 py-1.5 w-60">
+              <Search size={12} className="text-[#9aa1b1] shrink-0" />
+              <input
+                value={search}
+                onChange={e => setSearch(e.target.value)}
+                placeholder="Search assets, type, location…"
+                className="bg-transparent text-[12px] outline-none flex-1 placeholder-[#9aa1b1]"
+              />
             </div>
-            <select value={appFilter} onChange={e => setAppFilter(e.target.value)} className="text-[12px] border border-[#dde1e9] rounded-md px-2 py-1.5 bg-white outline-none text-[#1a1d23]">
-              {appOptions.map(o => <option key={o}>{o}</option>)}
-            </select>
-            <select value={typeFilter} onChange={e => setTypeFilter(e.target.value)} className="text-[12px] border border-[#dde1e9] rounded-md px-2 py-1.5 bg-white outline-none text-[#1a1d23]">
-              {typeOptions.map(o => <option key={o}>{o}</option>)}
-            </select>
-            <button className="flex items-center gap-1.5 text-[11px] text-[#6b7589] border border-[#dde1e9] px-3 py-1.5 rounded-md hover:bg-[#f5f6f8]">
-              <Download size={12} /> Export
+            <button onClick={handleExportCsv} className="flex items-center gap-1.5 text-[11px] font-medium text-white bg-[#1e3a5f] px-3 py-1.5 rounded-md hover:bg-[#162e4d] transition-colors">
+              <Download size={12} /> Export CSV
             </button>
           </div>
+
+          {/* Table */}
           <div className="overflow-x-auto">
-            <table className="w-full">
+            <table className="w-full text-left">
               <thead>
-                <tr className="border-b border-[#dde1e9] bg-[#f9fafb]">
-                  {["Artefact", "Type", "Algorithm / Tech", "Version", "Mode", "Source", "Location", "Application", "Confidence"].map(h => (
-                    <th key={h} className="px-3 py-2.5 text-left text-[10px] font-semibold text-[#6b7589] uppercase tracking-wide whitespace-nowrap">{h}</th>
-                  ))}
+                <tr className="bg-[#f9fafb] border-b border-[#dde1e9]">
+                  <th className="px-5 py-3 text-[11px] font-semibold text-[#6b7589] uppercase tracking-wide">
+                    Cryptographic Asset
+                  </th>
+                  <th className="px-5 py-3 text-[11px] font-semibold text-[#6b7589] uppercase tracking-wide">
+                    Asset Type
+                  </th>
+                  <th className="px-5 py-3 text-[11px] font-semibold text-[#6b7589] uppercase tracking-wide">
+                    Primitive
+                  </th>
+                  <th className="px-5 py-3 text-[11px] font-semibold text-[#6b7589] uppercase tracking-wide">
+                    Location
+                  </th>
                 </tr>
               </thead>
-              <tbody>
-                {filtered.map((row) => (
-                  <tr key={row.id} className="border-b border-[#f0f2f5] hover:bg-[#f9fafb] transition-colors">
-                    <td className="px-3 py-2.5 text-[12px] font-semibold text-[#1e3a5f] mono">{row.artefact}</td>
-                    <td className="px-3 py-2.5 text-[11px] text-[#6b7589]">{row.type}</td>
-                    <td className="px-3 py-2.5 text-[11px] mono text-[#1a1d23]">{row.algorithm}</td>
-                    <td className="px-3 py-2.5 text-[10px] mono text-[#6b7589]">{row.version}</td>
-                    <td className="px-3 py-2.5 text-[11px] text-[#6b7589]">{row.mode}</td>
-                    <td className="px-3 py-2.5 text-[11px] text-[#6b7589]">{row.source}</td>
-                    <td className="px-3 py-2.5 text-[10px] mono text-[#6b7589] max-w-[160px] truncate">{row.location}</td>
-                    <td className="px-3 py-2.5 text-[11px] text-[#1a1d23] font-medium whitespace-nowrap">{row.app}</td>
-                    <td className="px-3 py-2.5">
-                      <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded-full ${confBadge[row.confidence]}`}>{row.confidence}</span>
+              <tbody className="divide-y divide-gray-100">
+                {loading ? (
+                  <tr>
+                    <td colSpan={4} className="px-5 py-10 text-center text-[13px] text-gray-400">
+                      Loading assets…
                     </td>
                   </tr>
-                ))}
+                ) : filtered.length === 0 ? (
+                  <tr>
+                    <td colSpan={4} className="px-5 py-10 text-center text-[13px] text-gray-400">
+                      <div className="text-[#6b7589] text-[13px]">
+                        {analysesList.length === 0 
+                          ? "No applications analyzed yet. Run a cryptographic scan to discover assets."
+                          : "No cryptographic assets were detected for this application."}
+                      </div>
+                    </td>
+                  </tr>
+                ) : (
+                  filtered.map((row, idx) => (
+                    <tr key={row._id || row.assetId || idx} className="hover:bg-blue-50/30 transition-colors">
+                      {/* Asset name */}
+                      <td className="px-5 py-3">
+                        <span className="font-mono text-[12px] font-semibold text-[#1e3a5f]">
+                          {row.assetName || "-"}
+                        </span>
+                      </td>
+
+                      {/* Asset Type */}
+                      <td className="px-5 py-3 text-[12px] text-gray-700">
+                        {displayType(row.assetType)}
+                      </td>
+
+                      {/* Primitive */}
+                      <td className="px-5 py-3 text-[12px] text-gray-700">
+                        {displayPrimitive(row.primitive)}
+                      </td>
+
+                      {/* Location */}
+                      <td className="px-5 py-3">
+                        <span className="font-mono text-[12px] text-gray-600">
+                          {row.location || "-"}
+                        </span>
+                      </td>
+                    </tr>
+                  ))
+                )}
               </tbody>
             </table>
           </div>
         </div>
-
       </div>
     </div>
   );

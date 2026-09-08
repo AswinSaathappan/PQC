@@ -10,8 +10,8 @@ const nav = [
   { id: "runtime", label: "Runtime Evidence", icon: Activity },
   { type: "section", label: "ASSESSMENT" },
   { id: "classification", label: "Classification", icon: Tags },
-  { id: "quantumrisk", label: "Quantum Risk", icon: AlertTriangle },
-  { id: "risktimeline", label: "Risk Timeline", icon: Clock },
+
+  { id: "risktimeline", label: "Application Priority", icon: Clock },
   { type: "section", label: "DECISION SUPPORT" },
   { id: "priority", label: "Priority Analysis", icon: BarChart3 },
   { id: "recommendations", label: "Recommendations", icon: Lightbulb },
@@ -19,7 +19,7 @@ const nav = [
   { id: "dependency", label: "Dependency Impact", icon: GitBranch },
   { type: "section", label: "OUTPUT" },
   { id: "reports", label: "Reports", icon: FileText },
-  { id: "settings", label: "Settings", icon: Settings },
+
 ];
 
 interface Props { active: string; onNavigate: (id: string) => void; }
@@ -28,10 +28,8 @@ export default function Sidebar({ active, onNavigate }: Props) {
   return (
     <aside className="w-60 flex-shrink-0 bg-[#1e3a5f] flex flex-col h-full">
       <div className="px-4 py-4 border-b border-white/10">
-        <div className="flex items-center gap-2.5">
-          <div className="w-7 h-7 rounded bg-[#0d7a6b] flex items-center justify-center flex-shrink-0">
-            <Shield size={14} className="text-white" />
-          </div>
+        <div className="flex items-center gap-3">
+          <img src="/logo.png" alt="CRYPTAVISTA Logo" className="w-10 h-10 object-contain" />
           <div>
             <div className="text-white font-bold text-[13px] tracking-wide">CRYPTAVISTA</div>
             <div className="text-blue-200/50 text-[9px] font-medium tracking-widest uppercase">ECDAT Platform</div>
@@ -52,9 +50,8 @@ export default function Sidebar({ active, onNavigate }: Props) {
           const isActive = active === item.id;
           return (
             <button key={item.id} onClick={() => onNavigate(item.id!)}
-              className={`w-full flex items-center gap-2.5 px-4 py-2 text-left transition-colors text-[12px] font-medium ${
-                isActive ? "bg-white/10 text-white" : "text-blue-200/65 hover:text-white hover:bg-white/5"
-              }`}>
+              className={`w-full flex items-center gap-2.5 px-4 py-2 text-left transition-colors text-[12px] font-medium ${isActive ? "bg-white/10 text-white" : "text-blue-200/65 hover:text-white hover:bg-white/5"
+                }`}>
               <Icon size={14} className="flex-shrink-0" />
               <span className="flex-1">{item.label}</span>
               {isActive && <ChevronRight size={11} className="text-white/30" />}
@@ -63,14 +60,7 @@ export default function Sidebar({ active, onNavigate }: Props) {
         })}
       </nav>
 
-      <div className="px-4 py-3 border-t border-white/10">
-        <div className="text-blue-200/40 text-[9px] uppercase tracking-wider mb-1 font-medium">Active Analysis</div>
-        <div className="text-white text-[11px] font-semibold">Enterprise Q4 2026</div>
-        <div className="flex items-center gap-1.5 mt-0.5">
-          <div className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
-          <span className="text-blue-200/50 text-[10px]">5 applications · Complete</span>
-        </div>
-      </div>
+
     </aside>
   );
 }

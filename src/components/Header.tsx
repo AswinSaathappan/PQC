@@ -1,33 +1,47 @@
-import { Search, Bell, User, Plus, ChevronDown } from "lucide-react";
+import { Bell, User, Plus, ChevronDown } from "lucide-react";
+import { GlobalAnalysis } from "../App";
 
 interface Props {
   title: string;
   subtitle?: string;
   onNewAnalysis?: () => void;
+  analyses?: GlobalAnalysis[];
+  selectedAnalysisId?: string;
+  onSelectAnalysis?: (id: string) => void;
 }
 
-export default function Header({ title, subtitle, onNewAnalysis }: Props) {
+export default function Header({ title, subtitle, onNewAnalysis, analyses = [], selectedAnalysisId, onSelectAnalysis }: Props) {
   return (
     <header className="h-14 border-b border-[#dde1e9] bg-white flex items-center px-5 gap-4 flex-shrink-0">
-      <div className="flex-1 min-w-0">
-        <div className="flex items-baseline gap-1.5">
-          <span className="text-[10px] text-[#6b7589] font-medium">CRYPTAVISTA</span>
-          <span className="text-[10px] text-[#dde1e9]">/</span>
-          <span className="text-[13px] font-semibold text-[#1a1d23] truncate">{title}</span>
+      <div className="flex-1 min-w-0 flex items-center gap-6">
+        <div>
+          <div className="flex items-center gap-1.5">
+            <img src="/logo.png" alt="CryptaVista" className="w-5 h-5 object-contain" />
+            <span className="text-[10px] text-[#6b7589] font-medium">CRYPTAVISTA</span>
+            <span className="text-[10px] text-[#dde1e9]">/</span>
+            <span className="text-[13px] font-semibold text-[#1a1d23] truncate">{title}</span>
+          </div>
+          {subtitle && <div className="text-[10px] text-[#6b7589] truncate mt-0.5">{subtitle}</div>}
         </div>
-        {subtitle && <div className="text-[10px] text-[#6b7589] truncate mt-0.5">{subtitle}</div>}
-      </div>
 
-      {/* Project selector */}
-      <button className="flex items-center gap-1.5 border border-[#dde1e9] rounded-md px-2.5 py-1.5 text-[11px] text-[#1a1d23] hover:bg-[#f5f6f8] font-medium">
-        <div className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
-        Enterprise Q4 2026
-        <ChevronDown size={11} className="text-[#9aa1b1]" />
-      </button>
-
-      <div className="flex items-center gap-1.5 bg-[#f5f6f8] border border-[#dde1e9] rounded-md px-3 py-1.5 w-52">
-        <Search size={12} className="text-[#6b7589] flex-shrink-0" />
-        <input placeholder="Search assets, applications..." className="bg-transparent text-[12px] text-[#1a1d23] placeholder-[#9aa1b1] outline-none flex-1 min-w-0" />
+        {/* Global Application Selector */}
+        {analyses.length > 0 && onSelectAnalysis && (
+          <div className="relative">
+            <select
+              value={selectedAnalysisId || ""}
+              onChange={(e) => onSelectAnalysis(e.target.value)}
+              className="appearance-none bg-[#f5f6f8] border border-[#dde1e9] text-[#1a1d23] text-[11px] font-semibold py-1.5 pl-3 pr-8 rounded-md outline-none focus:border-[#1e3a5f] cursor-pointer"
+            >
+              <option value="" disabled>Select Application</option>
+              {analyses.map(a => (
+                <option key={a.analysisId} value={a.analysisId}>
+                  {a.applicationName}
+                </option>
+              ))}
+            </select>
+            <ChevronDown size={14} className="absolute right-2 top-1/2 -translate-y-1/2 text-[#6b7589] pointer-events-none" />
+          </div>
+        )}
       </div>
 
       <button className="relative p-1.5 rounded-md hover:bg-[#f5f6f8] transition-colors">

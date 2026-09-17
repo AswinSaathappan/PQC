@@ -143,6 +143,15 @@ export default function Applications({ onNewAnalysis, onNavigate, onSelectAnalys
     };
   }, []);
 
+  const handleStageClick = (e: React.MouseEvent, page: string, analysisId: string) => {
+    e.stopPropagation();
+    if (onSelectAnalysis) onSelectAnalysis(analysisId);
+    try {
+      localStorage.setItem("cryptavista_selected_analysis_id", analysisId);
+    } catch {}
+    if (onNavigate) onNavigate(page);
+  };
+
   if (loading) {
     return (
       <div className="flex-1 bg-[#f5f6f8] flex items-center justify-center">
@@ -215,7 +224,10 @@ export default function Applications({ onNewAnalysis, onNavigate, onSelectAnalys
                     
                     <div className="flex items-center gap-4 sm:gap-6 flex-wrap sm:flex-nowrap flex-shrink-0">
                       {/* 1. Discover */}
-                      <div className="text-right">
+                      <div 
+                        className="text-right"
+                        onClick={(e) => handleStageClick(e, 'discovery', app.analysisId)}
+                      >
                         <div className="text-[10px] font-semibold text-[#6b7589] uppercase tracking-wide">Discover</div>
                         <div className="text-[12px] font-semibold text-[#1a1d23] mt-0.5">
                           {stages.discover}
@@ -223,7 +235,10 @@ export default function Applications({ onNewAnalysis, onNavigate, onSelectAnalys
                       </div>
 
                       {/* 2. Runtime */}
-                      <div className="text-right">
+                      <div 
+                        className="text-right"
+                        onClick={(e) => handleStageClick(e, 'runtime', app.analysisId)}
+                      >
                         <div className="text-[10px] font-semibold text-[#6b7589] uppercase tracking-wide">Runtime</div>
                         <div className="text-[12px] font-semibold text-[#1a1d23] mt-0.5">
                           {app.runtimeEnabled ? 'ENABLED' : 'DISABLED'}
@@ -231,7 +246,10 @@ export default function Applications({ onNewAnalysis, onNavigate, onSelectAnalys
                       </div>
 
                       {/* 3. Assess */}
-                      <div className="text-right">
+                      <div 
+                        className="text-right"
+                        onClick={(e) => handleStageClick(e, 'classification', app.analysisId)}
+                      >
                         <div className="text-[10px] font-semibold text-[#6b7589] uppercase tracking-wide">Assess</div>
                         <div className="text-[12px] font-semibold text-[#1a1d23] mt-0.5">
                           {stages.assess}
@@ -239,7 +257,10 @@ export default function Applications({ onNewAnalysis, onNavigate, onSelectAnalys
                       </div>
 
                       {/* 4. Prioritize */}
-                      <div className="text-right">
+                      <div 
+                        className="text-right"
+                        onClick={(e) => handleStageClick(e, 'priority', app.analysisId)}
+                      >
                         <div className="text-[10px] font-semibold text-[#6b7589] uppercase tracking-wide">Prioritize</div>
                         <div className="text-[12px] font-semibold text-[#1a1d23] mt-0.5">
                           {stages.prioritize}
@@ -247,7 +268,10 @@ export default function Applications({ onNewAnalysis, onNavigate, onSelectAnalys
                       </div>
 
                       {/* 5. Recommendation */}
-                      <div className="text-right">
+                      <div 
+                        className="text-right"
+                        onClick={(e) => handleStageClick(e, 'recommendations', app.analysisId)}
+                      >
                         <div className="text-[10px] font-semibold text-[#6b7589] uppercase tracking-wide">Recommendation</div>
                         <div className="text-[12px] font-semibold text-[#1a1d23] mt-0.5">
                           {stages.recommendation}

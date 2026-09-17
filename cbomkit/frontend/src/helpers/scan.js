@@ -75,6 +75,12 @@ export function stopWebSocket() {
 }
 
 export function connectAndScan(gitBranch, gitSubfolder, credentials) {
+  const urlParams = new URLSearchParams(window.location.search);
+  const targetType = urlParams.get('targetType') || (window.__targetType) || '';
+  if (targetType === "folder") {
+    console.log("connectAndScan skipped: in folder mode, using LocalScanner");
+    return;
+  }
   model.resetScanningInfo();
   setCodeOrigin(gitBranch, gitSubfolder);
   setCredentials(credentials)
@@ -84,6 +90,11 @@ export function connectAndScan(gitBranch, gitSubfolder, credentials) {
 }
 
 function scan() {
+  const urlParams = new URLSearchParams(window.location.search);
+  const targetType = urlParams.get('targetType') || (window.__targetType) || '';
+  if (targetType === "folder") {
+    return;
+  }
   if (!model.scanning.socket) {
     model.addError(ErrorStatus.NoConnection);
     console.log("No socket in model");

@@ -1,9 +1,9 @@
 import { useState } from "react";
-import { CheckCircle, ChevronRight, FolderOpen, GitBranch, Box, Container } from "lucide-react";
+import { CheckCircle, ChevronRight, FolderOpen, GitBranch, Box, Container, Loader2 } from "lucide-react";
 
 const inputTypes = [
-  { id: "source", icon: GitBranch, label: "Source Code Repository", sub: "Git repository or uploaded code archive" },
-  { id: "folder", icon: FolderOpen, label: "Project Folder", sub: "Local project directory or uploaded folder" },
+  { id: "source", icon: GitBranch, label: "Git Repository", sub: "Scan a public Git repository via clone URL" },
+  { id: "folder", icon: FolderOpen, label: "Project Folder", sub: "Local project directory via folder picker" },
   { id: "binary", icon: Box, label: "Binary / Library", sub: "Compiled binaries or cryptographic library files" },
   { id: "container", icon: Container, label: "Container Image", sub: "OCI / Docker container image" },
 ];
@@ -13,9 +13,11 @@ const stepLabels = ["Add Application", "Application Context", "Analysis Configur
 interface Props {
   onComplete?: () => void;
   onNavigate?: (route: string) => void;
+  onSelectAnalysis?: (id: string) => void;
+  refreshAnalyses?: (preferredId?: string) => void;
 }
 
-export default function NewAnalysis({ onComplete, onNavigate }: Props) {
+export default function NewAnalysis({ onComplete, onNavigate, onSelectAnalysis, refreshAnalyses }: Props) {
   const [step, setStep] = useState(1);
 
   // Step 1
@@ -30,36 +32,62 @@ export default function NewAnalysis({ onComplete, onNavigate }: Props) {
   // Step 3
   const [runtimeEnabled, setRuntimeEnabled] = useState(true);
   const [crqcYear, setCrqcYear] = useState(2036);
+  const [isStarting, setIsStarting] = useState(false);
 
   const canNext1 = appName.trim().length > 0 && inputType !== null;
   const canNext2 = criticality !== "" && sensitivity !== "" && typeof dataLifetime === 'number' && dataLifetime > 0;
 
   async function startAnalysis() {
     try {
-      const formData = new FormData();
-      formData.append("applicationName", appName);
+      setIsStarting(true);
       const critVal = criticality === "Critical" ? 4 : criticality === "High" ? 3 : criticality === "Medium" ? 2 : 1;
       const sensVal = sensitivity === "Highly Confidential" ? 4 : sensitivity === "Confidential" ? 3 : sensitivity === "Internal" ? 2 : 1;
-      formData.append("businessCriticality", critVal.toString());
-      formData.append("dataSensitivity", sensVal.toString());
-      formData.append("runtimeEnabled", runtimeEnabled.toString());
-      formData.append("dataProtectionDuration", dataLifetime.toString());
-      formData.append("threatHorizonYear", crqcYear.toString());
-      formData.append("quantumRiskHorizon", (crqcYear - 2026).toString());
+
+      const payload = {
+        applicationName: appName.trim(),
+        targetType: inputType === "folder" ? "folder" : "source_code",
+        businessCriticality: critVal,
+        dataSensitivity: sensVal,
+        dataProtectionDuration: typeof dataLifetime === "number" ? dataLifetime : 5,
+        runtimeEnabled,
+        threatHorizonYear: crqcYear,
+        quantumRiskHorizon: crqcYear - 2026,
+        migrationDuration: 2
+      };
 
       const res = await fetch("http://localhost:3001/api/analyses", {
         method: "POST",
-        body: formData,
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify(payload)
       });
 
-      if (!res.ok) throw new Error("Failed to create analysis");
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData.error || "Failed to create analysis");
+      }
       const analysis = await res.json();
 
+      if (onSelectAnalysis && analysis?.analysisId) {
+        onSelectAnalysis(analysis.analysisId);
+      }
+      try {
+        if (analysis?.analysisId) {
+          localStorage.setItem("cryptavista_selected_analysis_id", analysis.analysisId);
+        }
+      } catch {}
+      if (refreshAnalyses && analysis?.analysisId) {
+        refreshAnalyses(analysis.analysisId);
+      }
+
       if (onNavigate) {
-        onNavigate(`cbomkit_discovery:${analysis.analysisId}`);
+        onNavigate(`cbom:${analysis.analysisId}`);
       }
     } catch (e: any) {
       alert("Failed to start analysis: " + e.message);
+    } finally {
+      setIsStarting(false);
     }
   }
 
@@ -122,6 +150,7 @@ export default function NewAnalysis({ onComplete, onNavigate }: Props) {
                   );
                 })}
               </div>
+
               <div className="mt-3 text-[10px] text-[#9aa1b1]">
                 Do not manually enter cryptographic algorithms — CRYPTAVISTA discovers these automatically from your input.
               </div>
@@ -281,6 +310,7 @@ export default function NewAnalysis({ onComplete, onNavigate }: Props) {
             <div className="bg-[#f9fafb] border border-[#dde1e9] rounded-lg divide-y divide-[#eef0f3]">
               {[
                 { label: "Application", value: appName },
+                { label: "Input Source", value: inputTypes.find(t => t.id === inputType)?.label ?? "—" },
                 { label: "Business Criticality", value: criticality },
                 { label: "Data Sensitivity", value: sensitivity },
                 { label: "Data Protection Duration", value: `${dataLifetime} Years` },
@@ -295,10 +325,11 @@ export default function NewAnalysis({ onComplete, onNavigate }: Props) {
             </div>
 
             <div className="flex justify-between pt-1">
-              <button onClick={() => setStep(3)} className="text-[12px] text-[#6b7589] px-3 py-1.5 hover:text-[#1a1d23] transition-colors">Back</button>
-              <button onClick={async () => await startAnalysis()}
-                className="text-[13px] font-bold bg-[#1e3a5f] text-white px-6 py-2.5 rounded-md hover:bg-[#162e4d] transition-colors">
-                Start Analysis
+              <button onClick={() => setStep(3)} disabled={isStarting} className="text-[12px] text-[#6b7589] px-3 py-1.5 hover:text-[#1a1d23] transition-colors">Back</button>
+              <button onClick={async () => await startAnalysis()} disabled={isStarting}
+                className="flex items-center gap-2 text-[13px] font-bold bg-[#1e3a5f] text-white px-6 py-2.5 rounded-md hover:bg-[#162e4d] disabled:opacity-50 transition-colors">
+                {isStarting && <Loader2 size={14} className="animate-spin" />}
+                {isStarting ? "Creating Application..." : "Start Analysis"}
               </button>
             </div>
           </div>

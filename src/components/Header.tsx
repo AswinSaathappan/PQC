@@ -35,7 +35,7 @@ export default function Header({ title, subtitle, onNewAnalysis, analyses = [], 
               <option value="" disabled>Select Application</option>
               {analyses.map(a => (
                 <option key={a.analysisId} value={a.analysisId}>
-                  {a.applicationName}
+                  {a.applicationName} ({a.analysisId})
                 </option>
               ))}
             </select>

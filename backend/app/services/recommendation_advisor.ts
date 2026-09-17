@@ -1,5 +1,6 @@
 import axios from 'axios';
 import { GoogleGenAI } from '@google/genai';
+import fs from 'fs';
 
 export interface AssetClassificationEvidence {
   algorithmName?: string;
@@ -60,7 +61,7 @@ export interface AiStatusInfo {
 
 export class RecommendationAdvisor {
   private static getAIModel(): string {
-    return process.env.AI_MODEL || 'gemini-flash-lite-latest';
+    return process.env.AI_MODEL || 'gemini-2.5-flash';
   }
 
   /**
@@ -149,31 +150,48 @@ export class RecommendationAdvisor {
       else if (upperName.includes('384') || normAlg.includes('384')) detectedAlg = 'SHA-384';
       else if (upperName.includes('512') || normAlg.includes('512')) detectedAlg = 'SHA-512';
       else detectedAlg = 'SHA-2';
+    } else if (upperName.includes('PBKDF2') || normAlg.includes('PBKDF2') || normPrim === 'kdf') {
+      detectedAlg = 'PBKDF2';
+    } else if (upperName.includes('DES') || normAlg.includes('DES')) {
+      if (upperName.includes('3DES') || upperName.includes('DES3') || upperName.includes('TRIPLE') || normAlg.includes('3DES')) {
+        detectedAlg = '3DES';
+      } else {
+        detectedAlg = 'DES';
+      }
+    } else if (upperName.includes('RC4') || normAlg.includes('RC4')) {
+      detectedAlg = 'RC4';
     }
 
     // Usage determination
     let usage = 'Unknown Usage';
-    if (
+    const isSigCandidate =
+      normPrim === 'signature' || upperName.includes('ECDSA') || upperName.includes('ED25519') ||
+      upperName.includes('ED448') || upperName.includes('RSASSA') || upperName.includes('DSA') ||
+      upperName.includes('WITHRSA') || upperName.includes('RSA-SHA') || upperName.includes('RSA256') ||
+      upperName.includes('SIGN') || normAlg.includes('WITHRSA') || normAlg.includes('RSA-SHA');
+
+    if (isSigCandidate) {
+      usage = 'Digital Signatures';
+    } else if (
+      normPrim === 'kdf' || upperName.includes('PBKDF2') || normAlg.includes('PBKDF2')
+    ) {
+      usage = 'Key Derivation';
+    } else if (
       normPrim === 'block-cipher' || normPrim === 'stream-cipher' ||
-      upperName.includes('AES') || upperName.includes('CHACHA') || upperName.includes('DES')
+      upperName.includes('AES') || upperName.includes('CHACHA') || upperName.includes('DES') || upperName.includes('RC4')
     ) {
       usage = 'Symmetric Encryption';
+    } else if (
+      normPrim === 'pke' || normPrim === 'kem' || normPrim === 'key-exchange' || normPrim === 'key-agree' ||
+      upperName.includes('DH') || upperName.includes('ECDH') || upperName.includes('ML-KEM') || upperName.includes('MLKEM') ||
+      (upperName.includes('RSA') && !isSigCandidate)
+    ) {
+      usage = 'Key Establishment';
     } else if (
       normPrim === 'hash' || normPrim === 'digest' ||
       upperName.includes('SHA') || upperName.includes('MD5')
     ) {
       usage = 'Cryptographic Hashing';
-    } else if (
-      normPrim === 'signature' || upperName.includes('ECDSA') || upperName.includes('ED25519') ||
-      upperName.includes('ED448') || upperName.includes('RSASSA') || upperName.includes('DSA')
-    ) {
-      usage = 'Digital Signatures';
-    } else if (
-      normPrim === 'pke' || normPrim === 'kem' || normPrim === 'key-exchange' ||
-      upperName.includes('DH') || upperName.includes('ECDH') || upperName.includes('ML-KEM') || upperName.includes('MLKEM') ||
-      (upperName.includes('RSA') && !normPrim.includes('signature') && !upperName.includes('SIGN'))
-    ) {
-      usage = 'Key Establishment';
     }
 
     return {
@@ -278,32 +296,129 @@ export class RecommendationAdvisor {
       };
     }
 
-    // 4. Hash Functions: SHA-256, SHA-384, SHA-512
-    if (
-      details.usage === 'Cryptographic Hashing' ||
-      normPrim === 'hash' || normPrim === 'digest' ||
-      upperName.includes('SHA') || upperAlg.includes('SHA')
-    ) {
+    // 4. Digital Signatures: RSA signatures, DSA, ECDSA, Ed25519, Ed448
+    const isSignature =
+      details.usage === 'Digital Signatures' ||
+      normPrim === 'signature' ||
+      upperName.includes('ECDSA') || upperAlg.includes('ECDSA') ||
+      upperName.includes('DSA') || upperAlg.includes('DSA') ||
+      upperName.includes('ED25519') || upperAlg.includes('ED25519') ||
+      upperName.includes('ED448') || upperAlg.includes('ED448') ||
+      upperName.includes('WITHRSA') || upperName.includes('RSA-SHA') || upperName.includes('RSA256') ||
+      upperName.includes('SIGN') || upperName.includes('RSASSA');
+
+    if (isSignature) {
       return {
-        recommendation: 'No PQC replacement required. Evaluate hash strength and usage requirements separately.',
-        replacement: 'No PQC replacement required (Cryptographic Hash)',
-        standard: 'NIST FIPS 180-4 / FIPS 202',
-        guidance: 'NIST FIPS 180-4 / FIPS 202',
-        purpose: 'Cryptographic Hashing',
-        why: 'Cryptographic hash functions provide robust post-quantum collision and preimage resistance (e.g., 128-bit quantum preimage security for SHA-256). Do not recommend ML-KEM or ML-DSA. Evaluate hash strength and usage requirements separately.',
-        strategy: 'Do not recommend ML-KEM or ML-DSA. Evaluate hash strength and usage requirements separately.',
+        recommendation: 'Recommend ML-DSA or SLH-DSA depending on the signature requirements.',
+        replacement: 'ML-DSA (FIPS 204) / SLH-DSA (FIPS 205)',
+        standard: 'NIST FIPS 204 / FIPS 205',
+        guidance: 'NIST FIPS 204 / FIPS 205',
+        purpose: 'Digital Signatures',
+        why: 'Factoring and discrete logarithm-based signatures (RSA signatures, ECDSA, DSA) are vulnerable to Shor\'s algorithm on a quantum computer. Recommend ML-DSA or SLH-DSA depending on signature requirements. Do not recommend ML-KEM for digital signatures.',
+        strategy: 'Adopt ML-DSA (FIPS 204) or SLH-DSA (FIPS 205) depending on signature performance, certificate constraints, and security requirements. Consider dual-signing during transition.',
         implementationSteps: [
-          'Confirm hash function usage is restricted to data integrity, HMAC, or KDF inputs.',
-          'Verify SHA-256 or higher is used; discontinue any legacy MD5 or SHA-1 usage.',
-          'Ensure digest lengths satisfy organizational data protection lifetime requirements.',
-          'Retain current algorithm without unnecessary post-quantum migration.'
+          'Inventory all digital signature verification and signing code paths.',
+          'Verify public-key infrastructure (PKI) and certificate authority support for FIPS 204 / FIPS 205.',
+          'Upgrade signing libraries to support ML-DSA or SLH-DSA.',
+          'Implement composite or hybrid signature verification to maintain classical validation guarantees.',
+          'Validate certificate sizes, handshake payloads, and verification timing.',
+          'Re-issue and rotate signing certificates and verification trust anchors.',
+          'Re-scan the application to verify updated signature suites.'
         ],
-        validation: 'Verify integrity of cryptographic hash usages across static analysis and runtime traces.',
-        isSymmetricOrHash: true
+        validation: 'Re-run CBOM discovery and compliance check to confirm signature verification suites comply with NIST post-quantum standards.'
       };
     }
 
-    // 5. Symmetric Block/Stream Ciphers (AES, ChaCha, etc.)
+    // 5. Key Establishment: RSA, DH, ECDH
+    const isKeyEstablishment =
+      details.usage === 'Key Establishment' ||
+      normPrim === 'pke' || normPrim === 'kem' || normPrim === 'key-exchange' || normPrim === 'key-agree' ||
+      upperName.includes('DH') || upperAlg.includes('DH') ||
+      upperName.includes('ECDH') || upperAlg.includes('ECDH') ||
+      (upperName.includes('RSA') && !normPrim.includes('signature') && !upperName.includes('SIGN') && !upperName.includes('WITHRSA') && !upperName.includes('RSA-SHA') && !upperName.includes('RSA256') && !upperName.includes('RSASSA'));
+
+    if (isKeyEstablishment) {
+      return {
+        recommendation: 'Recommend ML-KEM or an appropriate hybrid key-establishment approach.',
+        replacement: 'ML-KEM (FIPS 203) / Hybrid Key Establishment',
+        standard: 'NIST FIPS 203',
+        guidance: 'NIST FIPS 203',
+        purpose: 'Key Establishment',
+        why: 'Classical public-key exchange and encryption mechanisms (RSA key establishment, Diffie-Hellman, ECDH) are vulnerable to Shor\'s algorithm on a cryptanalytically relevant quantum computer. Recommend ML-KEM or an appropriate hybrid key-establishment approach.',
+        strategy: 'Adopt ML-KEM (NIST FIPS 203) or an appropriate hybrid key-establishment approach according to application interoperability and protocol requirements.',
+        implementationSteps: [
+          'Identify all classical key-establishment usage and protocol endpoints.',
+          'Identify dependent applications, network protocols, and cryptographic libraries.',
+          'Introduce ML-KEM-based key encapsulation or an appropriate hybrid deployment (e.g. X25519 + ML-KEM).',
+          'Test interoperability, public-key and ciphertext size overhead, and performance latency.',
+          'Migrate and rotate affected cryptographic key material where applicable.',
+          'Re-scan the application to confirm quantum resistance.'
+        ],
+        validation: 'Re-run CBOM discovery and compliance analysis and verify that the previous quantum-vulnerable cryptographic usage has been addressed.'
+      };
+    }
+
+    // 5.5 Key Derivation: PBKDF2
+    if (
+      details.usage === 'Key Derivation' ||
+      normPrim === 'kdf' ||
+      upperName.includes('PBKDF2') || upperAlg.includes('PBKDF2')
+    ) {
+      return {
+        recommendation: 'Assess PBKDF2 context: for password storage, migrate to Argon2id; for key derivation, use PBKDF2 with appropriately audited parameters and a cryptographically secure random salt.',
+        replacement: 'Argon2id (password storage) / PBKDF2 with audited parameters and secure random salt (key derivation)',
+        standard: 'NIST SP 800-132 / RFC 9106',
+        guidance: 'NIST SP 800-132 / RFC 9106',
+        purpose: 'Key Derivation',
+        why: 'PBKDF2 is a password-based key derivation function. While not broken by quantum computers, classical brute-force risks depend heavily on application context. For password hashing and storage, modern memory-hard functions like Argon2id (RFC 9106) provide superior GPU/ASIC resistance. For cryptographic key derivation, use PBKDF2 with appropriately audited parameters and a cryptographically secure random salt.',
+        strategy: 'Distinguish operational context: for password storage, migrate to Argon2id; for key derivation, use PBKDF2 with appropriately audited parameters and a cryptographically secure random salt.',
+        implementationSteps: [
+          'Audit invocation context to determine whether PBKDF2 is used for user password hashing or symmetric key derivation.',
+          'If used for password storage, migrate to Argon2id (RFC 9106) with appropriate memory and time cost parameters.',
+          'If used for key derivation, enforce PBKDF2 with appropriately audited parameters and a cryptographically secure random salt.',
+          'Select HMAC-SHA-256 or HMAC-SHA-512 as the pseudorandom function (PRF).',
+          'Audit iteration counts and operational parameters regularly to align with contemporary security standards.',
+          'Re-scan repository to verify updated key derivation parameters.'
+        ],
+        validation: 'Confirm password hashing uses Argon2id or key derivation uses PBKDF2 with appropriately audited parameters and a cryptographically secure random salt.',
+        isSymmetricOrHash: true,
+        algorithm: 'PBKDF2'
+      };
+    }
+
+    // 5.6 Legacy Symmetric Ciphers: DES, 3DES, RC4
+    const isLegacyCipher =
+      upperName.includes('3DES') || upperAlg.includes('3DES') || upperName.includes('DES3') ||
+      upperName.includes('DES') || upperAlg.includes('DES') ||
+      upperName.includes('RC4') || upperAlg.includes('RC4');
+
+    if (isLegacyCipher) {
+      const cipherName = (upperName.includes('3DES') || upperAlg.includes('3DES') || upperName.includes('DES3'))
+        ? '3DES'
+        : (upperName.includes('RC4') || upperAlg.includes('RC4')) ? 'RC4' : 'DES';
+
+      return {
+        recommendation: `Discontinue legacy cipher ${cipherName} and migrate to authenticated encryption such as AES-GCM or ChaCha20-Poly1305.`,
+        replacement: 'AES-GCM (NIST SP 800-38D) / ChaCha20-Poly1305 (RFC 8439)',
+        standard: 'NIST SP 800-131A Rev. 2 / RFC 8439',
+        guidance: 'NIST SP 800-131A Rev. 2',
+        purpose: 'Symmetric Encryption',
+        why: `${cipherName} is a legacy cipher that is deprecated and vulnerable to classical cryptanalysis (such as Sweet32 64-bit block collision attacks for DES/3DES or keystream bias attacks for RC4). This is a classical deprecation issue rather than a quantum replacement. Migrate to modern authenticated symmetric encryption such as AES-GCM or ChaCha20-Poly1305. Do not recommend ML-KEM or ML-DSA for symmetric cipher deprecation.`,
+        strategy: `Discontinue legacy cipher ${cipherName} and migrate to modern authenticated encryption such as AES-GCM or ChaCha20-Poly1305.`,
+        implementationSteps: [
+          `Inventory all application endpoints and data stores utilizing ${cipherName}.`,
+          'Replace cipher implementation with AES-256-GCM (NIST SP 800-38D) or ChaCha20-Poly1305 (RFC 8439).',
+          'Ensure cryptographic nonces/IVs are generated using a cryptographically secure RNG and are unique per encryption.',
+          'Rotate all legacy symmetric keys used with the discontinued algorithm.',
+          'Re-scan repository to confirm legacy cipher usage has been completely eliminated.'
+        ],
+        validation: `Re-run CBOM discovery to confirm zero occurrences of ${cipherName} in active code paths.`,
+        isSymmetricOrHash: true,
+        algorithm: cipherName
+      };
+    }
+
+    // 6. Symmetric Block/Stream Ciphers (AES, ChaCha, etc.)
     if (
       details.usage === 'Symmetric Encryption' ||
       normPrim === 'block-cipher' || normPrim === 'stream-cipher' ||
@@ -315,7 +430,7 @@ export class RecommendationAdvisor {
       const is256 = details.keySize === 256 || upperName.includes('256') || upperAlg.includes('256');
       const isGCM = details.mode === 'GCM' || upperName.includes('GCM') || upperAlg.includes('GCM');
 
-      // Rule 5A: AES128-ECB-PKCS5 / AES-128 with ECB mode
+      // Rule 6A: AES128-ECB-PKCS5 / AES-128 with ECB mode
       if (isECB && is128) {
         return {
           recommendation: 'Replace ECB mode with an authenticated encryption mode such as AES-GCM, and evaluate AES-256 where long-term protection requirements justify the stronger security margin.',
@@ -340,7 +455,7 @@ export class RecommendationAdvisor {
         };
       }
 
-      // Rule 5B: Any other ECB mode
+      // Rule 6B: Any other ECB mode
       if (isECB) {
         return {
           recommendation: 'Replace ECB mode with an authenticated encryption mode such as AES-GCM, and evaluate AES-256 where long-term protection requirements justify the stronger security margin.',
@@ -348,12 +463,14 @@ export class RecommendationAdvisor {
           standard: 'NIST SP 800-38D / FIPS 197',
           guidance: 'NIST SP 800-38D / FIPS 197',
           purpose: 'Symmetric Encryption',
-          why: 'The detected configuration uses ECB mode, which lacks confidentiality for repeated plaintext patterns and does not provide authentication. Migrate to AES-GCM per NIST SP 800-38D.',
-          strategy: 'Replace ECB mode with an authenticated encryption mode such as AES-GCM.',
+          why: 'The detected configuration uses ECB mode, which lacks confidentiality for repeated plaintext patterns and does not provide authentication. Changing key size does not fix ECB mode. The encryption mode vulnerability must be addressed separately by replacing ECB with an authenticated mode such as AES-GCM per NIST SP 800-38D, while evaluating AES-256 for long-term quantum security margins.',
+          strategy: 'Replace ECB mode with an authenticated encryption mode such as AES-GCM, and evaluate AES-256 where long-term protection requirements justify the stronger security margin.',
           implementationSteps: [
-            'Replace ECB mode with an authenticated encryption mode such as AES-GCM.',
-            'Review nonce/IV generation and key management.',
-            'Re-scan the repository.'
+            'Replace ECB mode with an authenticated encryption mode such as AES-GCM (NIST SP 800-38D).',
+            'Ensure proper cryptographic nonce/IV generation and enforce uniqueness per encryption.',
+            'Evaluate upgrading key length to AES-256 where long-term protection requirements justify the stronger security margin.',
+            'Review nonce/IV generation, key management, and key rotation schedules.',
+            'Re-scan the repository to verify that AES-ECB has been eliminated.'
           ],
           validation: 'Re-run CBOM discovery and verify that the AES-ECB finding has been removed.',
           isSymmetricOrHash: true,
@@ -362,7 +479,7 @@ export class RecommendationAdvisor {
         };
       }
 
-      // Rule 5C: Plain AES128 without ECB
+      // Rule 6C: Plain AES128 without ECB
       if (is128) {
         return {
           recommendation: 'Evaluate migration to AES-256 for long-lived or high-sensitivity data where the stronger security margin is appropriate.',
@@ -384,7 +501,7 @@ export class RecommendationAdvisor {
         };
       }
 
-      // Rule 5D: AES256 / Already 256-bit
+      // Rule 6D: AES256 / Already 256-bit
       return {
         recommendation: 'No PQC replacement required. Assess encryption mode, authenticated encryption, key management, nonce/IV handling, and key rotation.',
         replacement: 'Assess Mode, Nonce/IV, and Key Management',
@@ -406,68 +523,32 @@ export class RecommendationAdvisor {
       };
     }
 
-    // 6. Key Establishment: RSA, DH, ECDH
-    const isKeyEstablishment =
-      details.usage === 'Key Establishment' ||
-      normPrim === 'pke' || normPrim === 'kem' || normPrim === 'key-exchange' ||
-      upperName.includes('DH') || upperAlg.includes('DH') ||
-      upperName.includes('ECDH') || upperAlg.includes('ECDH') ||
-      (upperName.includes('RSA') && !normPrim.includes('signature') && !upperName.includes('SIGN'));
+    // 7. Hash Functions: SHA-256, SHA-384, SHA-512
+    const isHash =
+      details.usage === 'Cryptographic Hashing' ||
+      normPrim === 'hash' || normPrim === 'digest' ||
+      upperName.startsWith('SHA') || upperAlg.startsWith('SHA') ||
+      upperName.includes('SHA-256') || upperName.includes('SHA-384') || upperName.includes('SHA-512') ||
+      upperName.includes('SHA256') || upperName.includes('SHA384') || upperName.includes('SHA512') ||
+      upperName.includes('MD5') || upperName.includes('BLAKE');
 
-    if (isKeyEstablishment) {
-      const isECDH = upperName.includes('ECDH') || upperAlg.includes('ECDH');
+    if (isHash) {
       return {
-        recommendation: isECDH 
-          ? 'Recommend ML-KEM or an appropriate hybrid key-establishment approach.'
-          : 'Recommend ML-KEM or an appropriate hybrid mechanism where applicable.',
-        replacement: 'ML-KEM (FIPS 203) / Hybrid Key Establishment',
-        standard: 'NIST FIPS 203',
-        guidance: 'NIST FIPS 203',
-        purpose: 'Key Establishment',
-        why: 'Classical public-key exchange algorithms (RSA, Diffie-Hellman, ECDH) are vulnerable to Shor\'s algorithm on a cryptanalytically relevant quantum computer. Recommend ML-KEM or an appropriate hybrid mechanism where applicable.',
-        strategy: 'Recommend ML-KEM (NIST FIPS 203) or an appropriate hybrid key-establishment approach. Use ML-KEM-768 as the default illustrative parameter set where application requirements support it.',
+        recommendation: 'No PQC replacement required. Evaluate hash strength and usage requirements separately.',
+        replacement: 'No PQC replacement required for the cryptographic hash itself',
+        standard: 'NIST FIPS 180-4 / FIPS 202',
+        guidance: 'NIST FIPS 180-4 / FIPS 202',
+        purpose: 'Cryptographic Hashing',
+        why: 'Cryptographic hash functions provide robust post-quantum collision and preimage resistance (e.g., 128-bit quantum preimage security for SHA-256). Do not recommend ML-KEM or ML-DSA. Evaluate hash strength and usage requirements separately.',
+        strategy: 'Do not recommend ML-KEM or ML-DSA. Evaluate hash strength and usage requirements separately.',
         implementationSteps: [
-          'Identify all classical key-establishment usage and endpoints.',
-          'Identify dependent applications, network protocols, and cryptographic libraries.',
-          'Introduce ML-KEM-based key encapsulation (ML-KEM-768 recommended for general security).',
-          'Evaluate hybrid deployment requirements (e.g. X25519 + ML-KEM-768) to preserve backward compatibility.',
-          'Test interoperability, packet size overhead, and performance latency.',
-          'Migrate/rotate affected cryptographic key material where applicable.',
-          'Re-scan the application to confirm quantum resistance.'
+          'Confirm hash function usage is restricted to data integrity, HMAC, or KDF inputs.',
+          'Verify SHA-256 or higher is used; discontinue any legacy MD5 or SHA-1 usage.',
+          'Ensure digest lengths satisfy organizational data protection lifetime requirements.',
+          'Retain current algorithm without unnecessary post-quantum migration.'
         ],
-        validation: 'Re-run CBOM discovery and compliance analysis and verify that the previous quantum-vulnerable cryptographic usage has been addressed.'
-      };
-    }
-
-    // 7. Digital Signatures: RSA signatures, DSA, ECDSA, Ed25519, Ed448
-    const isSignature =
-      details.usage === 'Digital Signatures' ||
-      normPrim === 'signature' ||
-      upperName.includes('ECDSA') || upperAlg.includes('ECDSA') ||
-      upperName.includes('DSA') || upperAlg.includes('DSA') ||
-      upperName.includes('ED25519') || upperAlg.includes('ED25519') ||
-      upperName.includes('ED448') || upperAlg.includes('ED448') ||
-      upperName.includes('SIGN') || upperName.includes('RSASSA');
-
-    if (isSignature) {
-      return {
-        recommendation: 'Recommend ML-DSA or SLH-DSA depending on the signature requirements.',
-        replacement: 'ML-DSA (FIPS 204) / SLH-DSA (FIPS 205)',
-        standard: 'NIST FIPS 204 / FIPS 205',
-        guidance: 'NIST FIPS 204 / FIPS 205',
-        purpose: 'Digital Signatures',
-        why: 'Discrete logarithm and factoring-based digital signatures (ECDSA, DSA, RSA signatures) are vulnerable to Shor\'s algorithm. Recommend ML-DSA or SLH-DSA depending on signature requirements. Do not recommend ML-KEM for digital signatures.',
-        strategy: 'Adopt ML-DSA (FIPS 204) as the primary lattice-based digital signature replacement for high performance. For specialized use cases where lattice assumptions are undesirable or stateless hash trees are preferred, evaluate SLH-DSA (FIPS 205). Consider dual-signing during transition.',
-        implementationSteps: [
-          'Inventory all digital signature verification and signing code paths.',
-          'Verify public-key infrastructure (PKI) and certificate authority support for FIPS 204 / FIPS 205.',
-          'Upgrade signing libraries to support ML-DSA (ML-DSA-65) or SLH-DSA.',
-          'Implement composite or hybrid signature verification to maintain classical validation guarantees.',
-          'Validate certificate sizes, handshake payloads, and verification timing.',
-          'Re-issue and rotate signing certificates and verification trust anchors.',
-          'Re-scan the application to verify updated signature suites.'
-        ],
-        validation: 'Re-run CBOM discovery and compliance check to confirm signature verification suites comply with NIST post-quantum standards.'
+        validation: 'Verify integrity of cryptographic hash usages across static analysis and runtime traces.',
+        isSymmetricOrHash: true
       };
     }
 
@@ -494,17 +575,66 @@ export class RecommendationAdvisor {
   private static cachedStatus: { info: AiStatusInfo; expiresAt: number } | null = null;
 
   /**
+   * Safely resolves the API key from environment variables or referenced key files,
+   * distinguishing between missing keys, file-path misconfigurations, and valid key strings.
+   */
+  public static resolveApiKey(): { key?: string; errorReason?: string } {
+    const raw = (process.env.AI_API_KEY || process.env.GEMINI_API_KEY || '').trim();
+    if (!raw) {
+      return {
+        errorReason: 'Configure GEMINI_API_KEY in backend/.env to enable explanations.'
+      };
+    }
+
+    // Detect if value is a file path rather than an API key string
+    const isPathLike = /^[a-zA-Z]:[\\/]/.test(raw) || raw.startsWith('/') || raw.startsWith('./') || raw.endsWith('.env') || raw.endsWith('.txt');
+    if (isPathLike) {
+      if (fs.existsSync(raw)) {
+        try {
+          const stat = fs.statSync(raw);
+          if (stat.isFile()) {
+            if (raw.endsWith('.env')) {
+              const content = fs.readFileSync(raw, 'utf8');
+              const match = content.match(/GEMINI_API_KEY\s*=\s*(.+)/);
+              if (match && match[1]) {
+                const inner = match[1].trim().replace(/^["']|["']$/g, '');
+                if (inner && inner !== raw && !/^[a-zA-Z]:[\\/]/.test(inner)) {
+                  return { key: inner };
+                }
+              }
+              return {
+                errorReason: `GEMINI_API_KEY is currently set to the file path "${raw}" instead of an API key string. Please edit backend/.env and replace it with your Google AI Studio API key (starts with AIzaSy...).`
+              };
+            } else {
+              const content = fs.readFileSync(raw, 'utf8').trim();
+              if (content.length > 20 && !content.includes('\n')) {
+                return { key: content };
+              }
+            }
+          }
+        } catch {}
+      }
+      return {
+        errorReason: `GEMINI_API_KEY is configured with a file path rather than a Google Gemini API key. Please edit backend/.env and set your actual Google AI Studio API key (starts with AIzaSy...).`
+      };
+    }
+
+    return { key: raw };
+  }
+
+  /**
    * Check AI service status and API connectivity.
-   * Validates API key configuration and caches status to prevent burning quota on repeated healthchecks.
+   * Tests genuine reachability against Google Generative Language API when credentials are provided.
+   * Caches status to prevent burning quota on repeated healthchecks.
    */
   public static async checkAiStatus(forceRefresh = false): Promise<AiStatusInfo> {
-    const apiKey = process.env.GEMINI_API_KEY;
-    if (!apiKey || apiKey.trim() === '') {
+    const { key: apiKey, errorReason } = this.resolveApiKey();
+    if (!apiKey) {
       return {
         connected: false,
         available: false,
         service: 'AI Migration Advisor',
-        message: 'AI explanations are currently unavailable. Configure GEMINI_API_KEY to enable.'
+        message: errorReason || 'AI explanations are currently unavailable. Configure GEMINI_API_KEY in backend/.env to enable.'
       };
     }
 
@@ -513,19 +643,76 @@ export class RecommendationAdvisor {
       return this.cachedStatus.info;
     }
 
-    // Key is present and configured; cache for 5 minutes without burning generateContent quota
-    const status: AiStatusInfo = {
-      connected: true,
-      available: true,
-      service: 'AI Migration Advisor'
-    };
+    try {
+      const ai = new GoogleGenAI({ apiKey });
+      const targetModel = this.getAIModel();
+      const testModels = [targetModel, 'gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash'];
+      let verified = false;
+      let lastErr: any = null;
 
-    this.cachedStatus = {
-      info: status,
-      expiresAt: now + 5 * 60 * 1000
-    };
+      for (const m of testModels) {
+        try {
+          await ai.models.get({ model: m });
+          verified = true;
+          break;
+        } catch (err: any) {
+          lastErr = err;
+          if (err.status === 404 || err.message?.includes('404') || err.message?.includes('not found')) {
+            continue;
+          }
+          break;
+        }
+      }
 
-    return status;
+      if (verified) {
+        const status: AiStatusInfo = {
+          connected: true,
+          available: true,
+          service: 'AI Migration Advisor'
+        };
+        this.cachedStatus = {
+          info: status,
+          expiresAt: now + 3 * 60 * 1000 // Cache 3 minutes on verified success
+        };
+        return status;
+      } else {
+        const errMsg = lastErr?.message || '';
+        let userMessage = 'AI service unreachable or invalid credentials.';
+        if (errMsg.includes('API_KEY_INVALID') || errMsg.includes('API key not valid') || lastErr?.status === 400) {
+          userMessage = 'Google Gemini API rejected the configured key (API_KEY_INVALID). Please verify your Google AI Studio API key in backend/.env.';
+        } else if (errMsg.includes('PERMISSION_DENIED') || lastErr?.status === 403) {
+          userMessage = 'Google Gemini API returned Permission Denied (HTTP 403). Please check your Google AI Studio project and API key permissions.';
+        } else if (errMsg.includes('QUOTA_EXCEEDED') || errMsg.includes('RESOURCE_EXHAUSTED') || lastErr?.status === 429) {
+          userMessage = 'Google Gemini API quota exceeded (HTTP 429). Please check your rate limits or billing.';
+        }
+
+        console.warn(`[AI Advisor] AI health check failed: ${errMsg}`);
+        const status: AiStatusInfo = {
+          connected: false,
+          available: false,
+          service: 'AI Migration Advisor',
+          message: userMessage
+        };
+        this.cachedStatus = {
+          info: status,
+          expiresAt: now + 30 * 1000 // Cache 30s on failure so config updates are picked up quickly
+        };
+        return status;
+      }
+    } catch (err: any) {
+      console.warn(`[AI Advisor] AI health check error: ${err.message}`);
+      const status: AiStatusInfo = {
+        connected: false,
+        available: false,
+        service: 'AI Migration Advisor',
+        message: 'AI service unreachable.'
+      };
+      this.cachedStatus = {
+        info: status,
+        expiresAt: now + 30 * 1000
+      };
+      return status;
+    }
   }
 
   /**
@@ -546,9 +733,9 @@ export class RecommendationAdvisor {
   public static async generateAiMigrationPlan(
     structuredInput: any
   ): Promise<{ explanation: string; model: string }> {
-    const apiKey = process.env.GEMINI_API_KEY;
-    if (!apiKey || apiKey.trim() === '') {
-      throw new Error('AI explanations are currently unavailable. Configure the AI service to enable explanations.');
+    const { key: apiKey, errorReason } = this.resolveApiKey();
+    if (!apiKey) {
+      throw new Error(errorReason || 'AI explanations are currently unavailable. Configure the AI service to enable explanations.');
     }
 
     const ai = new GoogleGenAI({ apiKey });
@@ -599,11 +786,11 @@ Use short paragraphs.`;
     const targetModel = this.getAIModel();
     const candidateModels = [
       targetModel,
-      'gemini-flash-lite-latest',
-      'gemini-3.5-flash-lite',
-      'gemini-3.1-flash-lite',
-      'gemini-3.6-flash',
-      'gemini-3.8-flash'
+      'gemini-2.5-flash',
+      'gemini-2.0-flash',
+      'gemini-1.5-flash',
+      'gemini-2.5-flash-lite',
+      'gemini-flash-lite-latest'
     ];
     const uniqueModels = Array.from(new Set(candidateModels));
     let lastError: any = null;
@@ -615,10 +802,6 @@ Use short paragraphs.`;
           temperature: 0.2,
           maxOutputTokens: 2048
         };
-
-        if (modelName.includes('3.8')) {
-          config.thinkingConfig = { thinkingBudget: 0 };
-        }
 
         const response = await ai.models.generateContent({
           model: modelName,
@@ -733,11 +916,11 @@ Return structured JSON matching this schema:
       const targetModel = this.getAIModel();
       const candidateModels = [
         targetModel,
-        'gemini-flash-lite-latest',
-        'gemini-3.5-flash-lite',
-        'gemini-3.1-flash-lite',
-        'gemini-3.6-flash',
-        'gemini-3.8-flash'
+        'gemini-2.5-flash',
+        'gemini-2.0-flash',
+        'gemini-1.5-flash',
+        'gemini-2.5-flash-lite',
+        'gemini-flash-lite-latest'
       ];
       const uniqueModels = Array.from(new Set(candidateModels));
 

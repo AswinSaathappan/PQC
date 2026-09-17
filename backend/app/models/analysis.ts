@@ -14,11 +14,16 @@ export interface IAnalysis extends Document {
   migrationDuration?: number;
   runtimeEnabled: boolean;
   detectedCryptoAssetCount?: number;
+  scannedFiles?: number;
+  scannedLines?: number;
+  gitBranch?: string;
+  gitCommit?: string;
   cbomSummary?: {
     totalCryptoAssets: number;
     unknown: number;
     notApplicable: number;
     notQuantumSafe: number;
+    quantumSafe: number;
   };
   status: string; // 'CREATED' | 'RUNNING' | 'COMPLETED' | 'FAILED'
   currentStage: string;
@@ -48,11 +53,16 @@ const AnalysisSchema: Schema = new Schema({
   migrationDuration: { type: Number, default: 2 },
   runtimeEnabled: { type: Boolean, default: false },
   detectedCryptoAssetCount: { type: Number, default: 0 },
+  scannedFiles: { type: Number, default: 0 },
+  scannedLines: { type: Number, default: 0 },
+  gitBranch: { type: String },
+  gitCommit: { type: String },
   cbomSummary: {
     totalCryptoAssets: { type: Number, default: 0 },
     unknown: { type: Number, default: 0 },
     notApplicable: { type: Number, default: 0 },
-    notQuantumSafe: { type: Number, default: 0 }
+    notQuantumSafe: { type: Number, default: 0 },
+    quantumSafe: { type: Number, default: 0 }
   },
   status: { type: String, default: 'CREATED' },
   currentStage: { type: String, default: 'DISCOVER' },

@@ -1,5 +1,5 @@
-import React, { useEffect, useState } from "react";
-import { Download, Search, Box, HelpCircle, ShieldCheck, ShieldAlert, ChevronRight, ChevronDown } from "lucide-react";
+import React, { useEffect, useState, useRef, useCallback } from "react";
+import { Download, Search, Box, HelpCircle, ShieldCheck, ShieldAlert, ChevronRight, ChevronDown, RefreshCw, AlertTriangle, Loader2, Play, UploadCloud, PlusCircle, FileText, Sun } from "lucide-react";
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
 
@@ -8,16 +8,19 @@ interface CBOMProps {
   selectedAnalysisId?: string;
   onSelectAnalysis?: (id: string) => void;
   analyses?: any[];
+  onNavigate?: (route: string) => void;
 }
 
 export default function CBOM({ 
   analysisId, 
   selectedAnalysisId: propSelectedId, 
   onSelectAnalysis,
-  analyses: propAnalyses 
+  analyses: propAnalyses,
+  onNavigate
 }: CBOMProps) {
   const [analyses, setAnalyses] = useState<any[]>(propAnalyses || []);
-  const [selectedAnalysisId, setSelectedAnalysisId] = useState<string>(propSelectedId || analysisId || "");
+  const currentAnalysisId = analysisId || propSelectedId || (propAnalyses && propAnalyses.length > 0 ? propAnalyses[0].analysisId : "");
+  const selectedAnalysisId = currentAnalysisId;
   const [assets, setAssets] = useState<any[]>([]);
   const [analysis, setAnalysis] = useState<any>(null);
   const [summaryData, setSummaryData] = useState<any>(null);
@@ -25,13 +28,20 @@ export default function CBOM({
   const [search, setSearch] = useState("");
   const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set());
 
+  const iframeRef = useRef<HTMLIFrameElement>(null);
+  const [isScanning, setIsScanning] = useState(false);
+  const [scanError, setScanError] = useState<string | null>(null);
+
+  // Embedded CBOMKit visualization service state
+  const [cbomKitOnline, setCbomKitOnline] = useState<boolean | null>(null);
+  const [isCheckingCbomKit, setIsCheckingCbomKit] = useState(false);
+
+  const reqIdRef = useRef(0);
+
   // Keep analyses list synchronized
   useEffect(() => {
     if (propAnalyses && propAnalyses.length > 0) {
       setAnalyses(propAnalyses);
-      if (!selectedAnalysisId) {
-        setSelectedAnalysisId(propSelectedId || propAnalyses[0].analysisId);
-      }
     } else {
       async function fetchAnalyses() {
         try {
@@ -39,9 +49,6 @@ export default function CBOM({
           if (res.ok) {
             const data = await res.json();
             setAnalyses(data);
-            if (data.length > 0 && !selectedAnalysisId) {
-              setSelectedAnalysisId(data[0].analysisId);
-            }
           }
         } catch (err) {
           console.error("Failed to fetch analyses:", err);
@@ -51,74 +58,203 @@ export default function CBOM({
     }
   }, [propAnalyses]);
 
-  // Keep selectedAnalysisId synchronized with parent
-  useEffect(() => {
-    if (propSelectedId && propSelectedId !== selectedAnalysisId) {
-      setSelectedAnalysisId(propSelectedId);
-    }
-  }, [propSelectedId]);
-
   const handleSelectApp = (newId: string) => {
-    setSelectedAnalysisId(newId);
     if (onSelectAnalysis) {
       onSelectAnalysis(newId);
     }
+    if (onNavigate) {
+      onNavigate(`cbom:${newId}`);
+    }
   };
 
-  // Fetch application CBOM, summary, & asset inventory (clean reset on application switch)
-  useEffect(() => {
-    let isCancelled = false;
-
-    async function fetchData() {
-      if (!selectedAnalysisId) {
-        setLoading(false);
-        setAnalysis(null);
-        setAssets([]);
-        setSummaryData(null);
-        return;
-      }
-      setLoading(true);
+  // Fetch application CBOM, summary, & asset inventory in parallel
+  const fetchData = useCallback(async () => {
+    if (!currentAnalysisId) {
+      setLoading(false);
       setAnalysis(null);
       setAssets([]);
       setSummaryData(null);
-
-      try {
-        const aRes = await fetch(`http://localhost:3001/api/analyses/${selectedAnalysisId}`);
-        if (!isCancelled && aRes.ok) {
-          const aData = await aRes.json();
-          setAnalysis(aData);
-        }
-
-        const sRes = await fetch(`http://localhost:3001/api/analyses/${selectedAnalysisId}/cbom-summary`);
-        if (!isCancelled && sRes.ok) {
-          const sData = await sRes.json();
-          setSummaryData(sData);
-        }
-
-        const res = await fetch(`http://localhost:3001/api/analyses/${selectedAnalysisId}/assets`);
-        if (!isCancelled && res.ok) {
-          const assetsData = await res.json();
-          setAssets(assetsData);
-        } else if (!isCancelled) {
-          setAssets([]);
-        }
-      } catch (err) {
-        console.error("Failed to fetch CBOM data", err);
-        if (!isCancelled) {
-          setAssets([]);
-        }
-      } finally {
-        if (!isCancelled) {
-          setLoading(false);
-        }
-      }
+      return;
     }
 
+    const reqId = ++reqIdRef.current;
+    setLoading(true);
+    setAnalysis(null);
+    setAssets([]);
+    setSummaryData(null);
+
+    try {
+      const [aRes, sRes, res] = await Promise.all([
+        fetch(`http://localhost:3001/api/analyses/${currentAnalysisId}`).catch(() => null),
+        fetch(`http://localhost:3001/api/analyses/${currentAnalysisId}/cbom-summary`).catch(() => null),
+        fetch(`http://localhost:3001/api/analyses/${currentAnalysisId}/assets`).catch(() => null)
+      ]);
+
+      if (reqId !== reqIdRef.current) return;
+
+      if (aRes && aRes.ok) {
+        const aData = await aRes.json();
+        if (reqId === reqIdRef.current) setAnalysis(aData);
+      }
+
+      if (sRes && sRes.ok) {
+        const sData = await sRes.json();
+        if (reqId === reqIdRef.current) setSummaryData(sData);
+      }
+
+      if (res && res.ok) {
+        const assetsData = await res.json();
+        if (reqId === reqIdRef.current) setAssets(assetsData);
+      } else if (reqId === reqIdRef.current) {
+        setAssets([]);
+      }
+    } catch (err) {
+      console.error("Failed to fetch CBOM data", err);
+      if (reqId === reqIdRef.current) {
+        setAssets([]);
+      }
+    } finally {
+      if (reqId === reqIdRef.current) {
+        setLoading(false);
+      }
+    }
+  }, [currentAnalysisId]);
+
+  useEffect(() => {
     fetchData();
-    return () => {
-      isCancelled = true;
+  }, [fetchData]);
+
+  // Incremental data fetch during scan (updates cards and table live without clearing or flicker)
+  const fetchIncrementalData = useCallback(async () => {
+    if (!currentAnalysisId) return;
+    try {
+      const [aRes, sRes, res] = await Promise.all([
+        fetch(`http://localhost:3001/api/analyses/${currentAnalysisId}`).catch(() => null),
+        fetch(`http://localhost:3001/api/analyses/${currentAnalysisId}/cbom-summary`).catch(() => null),
+        fetch(`http://localhost:3001/api/analyses/${currentAnalysisId}/assets`).catch(() => null)
+      ]);
+
+      if (aRes && aRes.ok) {
+        const aData = await aRes.json();
+        setAnalysis((prev: any) => ({ ...prev, ...aData }));
+      }
+
+      if (sRes && sRes.ok) {
+        const sData = await sRes.json();
+        setSummaryData(sData);
+      }
+
+      if (res && res.ok) {
+        const assetsData = await res.json();
+        if (Array.isArray(assetsData) && assetsData.length > 0) {
+          setAssets(assetsData);
+        }
+      }
+    } catch (err) {
+      console.error("Incremental fetch error:", err);
+    }
+  }, [currentAnalysisId]);
+
+  // Reset/initialize scan status when switching target application
+  useEffect(() => {
+    setIsScanning(false);
+    setScanError(null);
+  }, [currentAnalysisId]);
+
+  const handleCbomFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !currentAnalysisId) return;
+    try {
+      setIsScanning(true);
+      setScanError(null);
+      const text = await file.text();
+      const cbomJson = JSON.parse(text);
+      const res = await fetch(`http://localhost:3001/api/analyses/${currentAnalysisId}/cbom`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(cbomJson),
+      });
+      if (!res.ok) {
+        const formData = new FormData();
+        formData.append("file", file);
+        await fetch(`http://localhost:3001/api/analyses/${currentAnalysisId}/scan`, {
+          method: "POST",
+          body: formData,
+        });
+      }
+      fetchData();
+    } catch (err: any) {
+      setScanError(err.message || "Failed to upload CBOM file");
+    } finally {
+      setIsScanning(false);
+    }
+  };
+
+  useEffect(() => {
+    const handleMsg = (e: MessageEvent) => {
+      if (e.data && (e.data.type === 'SCAN_STARTED' || e.data.type === 'FOLDER_SCAN_STARTED')) {
+        setAnalysis((prev: any) => ({ ...prev, status: 'RUNNING' }));
+      }
     };
-  }, [selectedAnalysisId]);
+    window.addEventListener('message', handleMsg);
+    return () => window.removeEventListener('message', handleMsg);
+  }, []);
+
+  const resolvedTargetType = (analysis?.targetType) || (analyses.find(a => a.analysisId === currentAnalysisId)?.targetType) || '';
+  const iframeSrc = React.useMemo(() => {
+    if (!currentAnalysisId) return '';
+    return `http://localhost:8001/?analysisId=${encodeURIComponent(currentAnalysisId)}&targetType=${encodeURIComponent(resolvedTargetType)}&v=20260916v8`;
+  }, [currentAnalysisId, resolvedTargetType]);
+
+  const lastLoadedAnalysisRef = useRef<string>('');
+  useEffect(() => {
+    if (currentAnalysisId && currentAnalysisId !== lastLoadedAnalysisRef.current && iframeRef.current?.contentWindow) {
+      lastLoadedAnalysisRef.current = currentAnalysisId;
+      try {
+        iframeRef.current.contentWindow.postMessage({
+          type: 'LOAD_ANALYSIS',
+          analysisId: currentAnalysisId,
+          targetType: resolvedTargetType,
+          status: analysis?.status
+        }, '*');
+      } catch {}
+    }
+  }, [currentAnalysisId, resolvedTargetType]);
+
+  // State calculations
+  const isCompleted = !loading && (analysis?.status === 'COMPLETED' || (assets.length > 0 && analysis?.status !== 'RUNNING' && analysis?.status !== 'FAILED'));
+  const isRunning = isScanning || (!loading && (analysis?.status === 'RUNNING' || analysis?.status === 'CREATED'));
+  const isFailed = !loading && (analysis?.status === 'FAILED' || !!scanError) && !isRunning;
+  const isNotStarted = !loading && !isCompleted && !isRunning && !isFailed;
+
+  // Background status polling when analysis is in progress
+  useEffect(() => {
+    if (!currentAnalysisId || isCompleted || isFailed) return;
+
+    const interval = setInterval(async () => {
+      try {
+        const res = await fetch(`http://localhost:3001/api/analyses/${currentAnalysisId}/status`);
+        if (res.ok) {
+          const data = await res.json();
+          if (data.status === 'COMPLETED') {
+            clearInterval(interval);
+            setIsScanning(false);
+            fetchData();
+          } else if (data.status === 'FAILED') {
+            clearInterval(interval);
+            setIsScanning(false);
+            setAnalysis((prev: any) => ({ ...prev, status: 'FAILED', errorMessage: data.errorMessage }));
+          } else if (data.status === 'RUNNING') {
+            fetchIncrementalData();
+          }
+        }
+      } catch (err) {
+        console.error("Polling status error:", err);
+      }
+    }, 1000);
+
+    return () => clearInterval(interval);
+  }, [currentAnalysisId, isCompleted, isFailed, fetchData, fetchIncrementalData]);
 
   const filtered = assets.filter(a => 
     !search || 
@@ -134,6 +270,26 @@ export default function CBOM({
     else newExpanded.add(id);
     setExpandedRows(newExpanded);
   };
+
+  // Check reachability of external CBOMKit service on port 8001
+  const checkCBOMKit = async () => {
+    setIsCheckingCbomKit(true);
+    try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 2000);
+      await fetch("http://localhost:8001/", { mode: "no-cors", signal: controller.signal });
+      clearTimeout(timeoutId);
+      setCbomKitOnline(true);
+    } catch {
+      setCbomKitOnline(false);
+    } finally {
+      setIsCheckingCbomKit(false);
+    }
+  };
+
+  useEffect(() => {
+    checkCBOMKit();
+  }, []);
 
   // Summary Data Model (Authoritative 5 CBOMKit compliance counts from backend response)
   const totalCryptoAssets = summaryData?.totalCryptoAssets ?? (analysis?.detectedCryptoAssetCount ?? assets.length);
@@ -194,9 +350,10 @@ export default function CBOM({
     doc.setTextColor(30, 58, 95);
     doc.text("Executive Summary", 14, 68);
     
-    // Summary Blocks (Exact 5 CBOM metrics)
+    // Summary Blocks (Exact CBOM occurrence and unique asset metrics)
     const summaryTableData = [
-      ["Total Cryptographic Assets", cbomSummary.totalCryptoAssets.toString()],
+      ["Total Cryptographic Asset Occurrences", cbomSummary.totalCryptoAssets.toString()],
+      ["Unique Logical Cryptographic Assets", (assets.length > 0 ? new Set(assets.map(a => a.assetName || a.algorithm)).size.toString() : "-")],
       ["Unknown", cbomSummary.unknown.toString()],
       ["Not Applicable", cbomSummary.notApplicable.toString()],
       ["Not Quantum Safe", cbomSummary.notQuantumSafe.toString()],
@@ -295,18 +452,27 @@ export default function CBOM({
               <span>Application: <strong className="text-gray-900">{analysis?.applicationName || 'Unknown'}</strong></span>
               <span className="w-1 h-1 rounded-full bg-gray-300"></span>
               <span className="flex items-center gap-1">
-                Scan Status: <span className="text-emerald-600 font-medium">Completed</span>
+                Scan Status:{" "}
+                <span className={`font-medium ${
+                  isCompleted ? "text-emerald-600" : isRunning ? "text-blue-600" : isFailed ? "text-red-600" : "text-amber-600"
+                }`}>
+                  {isCompleted ? "Completed" : isRunning ? "Scanning..." : isFailed ? "Failed" : "Input Required"}
+                </span>
               </span>
-              <span className="w-1 h-1 rounded-full bg-gray-300"></span>
-              <span>Generated: {analysis?.stages?.discover?.completedAt ? new Date(analysis.stages.discover.completedAt).toLocaleString() : 'N/A'}</span>
+              {isCompleted && (
+                <>
+                  <span className="w-1 h-1 rounded-full bg-gray-300"></span>
+                  <span>Generated: {analysis?.stages?.discover?.completedAt ? new Date(analysis.stages.discover.completedAt).toLocaleString() : 'N/A'}</span>
+                </>
+              )}
             </div>
           </div>
           
           <div className="flex gap-4 items-center">
             <div className="flex flex-col items-end">
                <span className="text-[10px] uppercase font-bold text-gray-500 mb-1">Target Application</span>
-               <select 
-                  value={selectedAnalysisId} 
+                <select 
+                  value={currentAnalysisId} 
                   onChange={e => handleSelectApp(e.target.value)} 
                   className="text-[12px] border border-[#dde1e9] rounded-md px-3 py-1.5 bg-gray-50 outline-none text-[#1a1d23] font-medium min-w-[200px]"
                 >
@@ -319,34 +485,73 @@ export default function CBOM({
                 </select>
             </div>
             
-            <div className="h-10 w-px bg-gray-200 mx-2"></div>
-
-            <button onClick={handleDownloadPdf} className="px-4 py-2 bg-[#1e3a5f] hover:bg-[#162e4d] text-white rounded-md text-sm font-medium flex items-center gap-2 transition-colors">
-              <Download size={16} /> Download CBOM PDF
-            </button>
+            {isCompleted && (
+              <>
+                <div className="h-10 w-px bg-gray-200 mx-2"></div>
+                <button onClick={handleDownloadPdf} className="px-4 py-2 bg-[#1e3a5f] hover:bg-[#162e4d] text-white rounded-md text-sm font-medium flex items-center gap-2 transition-colors">
+                  <Download size={16} /> Download CBOM PDF
+                </button>
+              </>
+            )}
           </div>
         </div>
 
-        {/* Dynamic CBOM Stats: Exactly 5 cards */}
-        {!loading && !selectedAnalysisId ? (
-          <div className="bg-white border border-[#dde1e9] rounded-lg p-6 text-center text-gray-500 text-sm">
-            CBOM data unavailable
+        {/* Loading indicator */}
+        {loading && !analysis && (
+          <div className="bg-white border border-[#dde1e9] rounded-lg p-10 flex flex-col items-center justify-center gap-3 shadow-sm">
+            <Loader2 className="animate-spin text-[#1e3a5f]" size={28} />
+            <div className="text-xs font-semibold text-[#6b7589]">Loading application analysis...</div>
           </div>
-        ) : (
-          <div className="grid gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-5">
-            {/* CARD 1: Total Crypto Assets */}
+        )}
+
+        {/* Lifecycle Status Banners */}
+        {isFailed && (
+          <div className="bg-white border border-red-200 rounded-lg p-5 flex items-start justify-between gap-4 shadow-sm">
+            <div className="flex items-start gap-3">
+              <div className="p-2 bg-red-50 rounded-full text-red-600 shrink-0 mt-0.5">
+                <AlertTriangle size={20} />
+              </div>
+              <div>
+                <h4 className="text-sm font-bold text-red-800">Cryptographic Analysis Failed</h4>
+                <p className="text-xs text-[#6b7589] mt-1">The analysis encountered an error during cryptographic discovery or processing.</p>
+                {(scanError || analysis?.errorMessage) && (
+                  <div className="mt-2 text-xs font-mono text-red-700 bg-red-50/80 p-2.5 rounded border border-red-200 break-all">
+                    {scanError || analysis?.errorMessage}
+                  </div>
+                )}
+              </div>
+            </div>
+            <button
+              onClick={() => {
+                setIsScanning(false);
+                setScanError(null);
+                if (analysis) {
+                  setAnalysis({ ...analysis, status: 'CREATED', errorMessage: null });
+                }
+              }}
+              className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-md text-xs font-semibold shrink-0 transition-colors"
+            >
+              Retry Scan
+            </button>
+          </div>
+        )}
+
+
+        {/* Dynamic CBOM Stats: Exactly 5 cards matching user screenshot */}
+        <div className="grid gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-5">
+            {/* CARD 1: Total Cryptographic Asset Occurrences */}
             <div className="bg-white border border-[#dde1e9] rounded-lg p-5 shadow-sm flex flex-col justify-between">
               <div>
                 <div className="flex items-center gap-2 text-blue-600 mb-1">
                   <Box size={18} />
-                  <div className="text-xs font-semibold uppercase tracking-wider text-[#6b7589]">Total Crypto Assets</div>
+                  <div className="text-xs font-semibold uppercase tracking-wider text-[#6b7589]">Total Cryptographic Asset Occurrences</div>
                 </div>
                 <div className="text-3xl font-bold text-[#1a1d23] mt-2">
                   {loading ? "…" : (!analysis && assets.length === 0) ? "CBOM data unavailable" : cbomSummary.totalCryptoAssets}
                 </div>
               </div>
               <div className="text-[10px] text-[#6b7589] mt-3">
-                Authoritative CBOM count
+                {assets.length > 0 ? `${cbomSummary.totalCryptoAssets} occurrences across ${new Set(assets.map(a => a.assetName || a.algorithm)).size} unique logical cryptographic assets` : 'Authoritative CBOM count'}
               </div>
             </div>
 
@@ -422,32 +627,80 @@ export default function CBOM({
               </div>
             </div>
           </div>
-        )}
 
         {/* Cryptographic Visualization (Dark-Themed) */}
-        <div className="bg-white border border-[#dde1e9] rounded-lg flex flex-col overflow-hidden shadow-sm h-[600px]">
+        <div className="bg-white border border-[#dde1e9] rounded-lg flex flex-col overflow-hidden shadow-sm h-[620px]">
           <div className="px-5 py-3 border-b border-[#dde1e9] bg-gray-50 flex items-center justify-between">
-            <div className="text-sm font-semibold text-[#1a1d23]">Cryptographic Visualization</div>
-            <div className="flex items-center gap-2">
-              <span className="px-2 py-1 bg-white border border-gray-200 rounded text-xs font-medium text-gray-600">
-                CBOM Graph Explorer
+            <div className="flex items-center gap-3">
+              <div className="text-sm font-semibold text-[#1a1d23]">Cryptographic Visualization</div>
+              <span className="text-xs text-gray-500 font-normal">
+                {assets.length} Cryptographic Asset Occurrences Mapped
+              </span>
+            </div>
+            
+            <div className="flex items-center gap-3">
+              <span className="flex items-center gap-1.5 text-xs text-gray-500 font-medium">
+                <span className={`w-2 h-2 rounded-full ${cbomKitOnline ? 'bg-emerald-500' : 'bg-amber-500'}`}></span>
+                {cbomKitOnline ? 'CBOM Service Online' : 'Checking service...'}
               </span>
             </div>
           </div>
-          <div className="flex-1 w-full bg-[#1e1e1e] relative overflow-hidden">
-            <iframe 
-              key={selectedAnalysisId}
-              src="http://localhost:8001/" 
-              title="CBOMKit Visualization"
-              className="w-full h-full border-none"
-            />
+
+          <div className="flex-1 w-full bg-[#0f172a] relative overflow-hidden">
+            {cbomKitOnline === false ? (
+              <div className="flex flex-col items-center justify-center h-full p-8 text-center text-slate-300">
+                <div className="w-14 h-14 rounded-full bg-slate-800 border border-slate-700 flex items-center justify-center mb-4 text-amber-400">
+                  <ShieldAlert size={28} />
+                </div>
+                <h3 className="text-base font-semibold text-white mb-2">
+                  CBOM visualization service unavailable (Port 8001 is offline)
+                </h3>
+                <p className="text-xs text-slate-400 max-w-md mb-6 leading-relaxed">
+                  The standalone CBOM visualization service is not responding at <code className="text-amber-300">http://localhost:8001/</code>. Please ensure the CBOM service is running.
+                </p>
+                <div className="flex items-center gap-3">
+                  <button
+                    onClick={checkCBOMKit}
+                    disabled={isCheckingCbomKit}
+                    className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-md text-xs font-semibold shadow transition-colors flex items-center gap-1.5"
+                  >
+                    <RefreshCw size={14} className={isCheckingCbomKit ? "animate-spin" : ""} />
+                    {isCheckingCbomKit ? "Checking..." : "Retry Connection"}
+                  </button>
+                </div>
+              </div>
+            ) : !currentAnalysisId ? (
+              <div className="flex flex-col items-center justify-center h-full p-8 text-center text-slate-300">
+                <Loader2 className="animate-spin mb-3 text-blue-400" size={32} />
+                <h3 className="text-sm font-semibold text-white mb-1">
+                  Loading Cryptographic Visualization...
+                </h3>
+                <p className="text-xs text-slate-400">Selecting application analysis</p>
+              </div>
+            ) : (
+              <iframe 
+                ref={iframeRef}
+                key={currentAnalysisId}
+                src={iframeSrc} 
+                title="CBOM Visualization"
+                className="w-full h-full border-none"
+                onLoad={(e) => {
+                  try {
+                    const iframe = e.currentTarget;
+                    if (iframe.contentWindow) {
+                      iframe.contentWindow.postMessage({ type: 'LOAD_ANALYSIS', analysisId: currentAnalysisId, targetType: resolvedTargetType }, '*');
+                    }
+                  } catch {}
+                }}
+              />
+            )}
           </div>
         </div>
 
         {/* Assets Table */}
         <div className="bg-white border border-[#dde1e9] rounded-lg overflow-hidden shadow-sm">
           <div className="px-5 py-4 border-b border-[#dde1e9] flex items-center justify-between">
-            <div className="text-sm font-semibold text-[#1a1d23]">Cryptographic Assets ({loading ? "…" : filtered.length})</div>
+            <div className="text-sm font-semibold text-[#1a1d23]">Cryptographic Asset Occurrences ({loading ? "…" : filtered.length})</div>
             <div className="flex items-center gap-2 bg-[#f5f6f8] border border-[#dde1e9] rounded-md px-3 py-1.5 w-64">
               <Search size={14} className="text-[#6b7589]" />
               <input 
@@ -466,16 +719,25 @@ export default function CBOM({
                   <th className="px-5 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Asset</th>
                   <th className="px-5 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Type</th>
                   <th className="px-5 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Primitive</th>
-                  <th className="px-5 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">CBOMKit Status</th>
+                  <th className="px-5 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">CBOM Status</th>
                   <th className="px-5 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Quantum Risk</th>
                   <th className="px-5 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Location</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100">
                 {loading ? (
-                  <tr><td colSpan={6} className="p-8 text-center text-gray-500">Loading assets...</td></tr>
+                  <tr><td colSpan={6} className="p-8 text-center text-gray-500"><Loader2 className="animate-spin inline mr-2 text-blue-600" size={16} />Loading cryptographic assets...</td></tr>
+                ) : analysis?.status === 'FAILED' ? (
+                  <tr><td colSpan={6} className="p-8 text-center text-red-600">
+                    <div className="font-semibold mb-1">Cryptographic Analysis Failed</div>
+                    <div className="text-xs text-red-500 font-mono">{analysis.errorMessage || 'Error occurred during discovery.'}</div>
+                  </td></tr>
+                ) : (analysis?.status === 'RUNNING' || analysis?.status === 'CREATED') ? (
+                  <tr><td colSpan={6} className="p-8 text-center text-blue-600">
+                    <Loader2 className="animate-spin inline mr-2" size={16} />Cryptographic discovery in progress...
+                  </td></tr>
                 ) : filtered.length === 0 ? (
-                  <tr><td colSpan={6} className="p-8 text-center text-gray-500">No cryptographic assets found.</td></tr>
+                  <tr><td colSpan={6} className="p-8 text-center text-gray-500">No cryptographic assets detected in this application.</td></tr>
                 ) : (
                   filtered.map((asset, idx) => {
                     const rawCbom = (asset.cbomkitClassification || '').toLowerCase();

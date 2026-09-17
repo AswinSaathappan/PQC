@@ -9,10 +9,13 @@ export interface AssetRecord {
   primitive?: string;
   algorithm?: string;
   location?: string;
+  keySize?: number | string;
+  mode?: string;
+  version?: string;
   cbomkitClassification?: string;
   cbomKitClassification?: string;
-  cryptavistaQuantumRisk?: 'LOW' | 'MEDIUM' | 'HIGH' | 'UNKNOWN';
-  cryptavistaQuantumClassification?: 'QUANTUM_SAFE' | 'QUANTUM_RESISTANT' | 'NOT_QUANTUM_SAFE' | 'UNKNOWN';
+  cryptavistaQuantumRisk?: 'LOW' | 'MEDIUM' | 'HIGH' | 'UNKNOWN' | 'NOT_APPLICABLE' | 'CONTEXT_DEPENDENT';
+  cryptavistaQuantumClassification?: 'QUANTUM_SAFE' | 'QUANTUM_RESISTANT' | 'NOT_QUANTUM_SAFE' | 'UNKNOWN' | 'NOT_APPLICABLE' | 'CONTEXT_DEPENDENT';
   cryptavistaScore?: number | null;
   cryptavistaReason?: string;
   cryptavistaEvidence?: string[];
@@ -79,15 +82,21 @@ function getCbomkitDisplay(asset: AssetRecord): { raw: string; label: string } {
  * Resolves CRYPTAVISTA Quantum Risk with pure deterministic policy fallback
  * in case an asset document in the database was created prior to reprocessing.
  */
-function getCryptavistaPosture(asset: AssetRecord): {
+function getCryptavistaQuantumRisk(asset: AssetRecord): {
   risk: 'LOW' | 'MEDIUM' | 'HIGH' | 'UNKNOWN';
   score: number | null;
   classification: string;
   reason: string;
 } {
   if (asset.cryptavistaQuantumRisk) {
-    const r = asset.cryptavistaQuantumRisk;
-    const s = asset.cryptavistaScore !== undefined ? asset.cryptavistaScore : (r === 'LOW' ? 20 : r === 'MEDIUM' ? 60 : r === 'HIGH' ? 100 : null);
+    const rawR = asset.cryptavistaQuantumRisk as string;
+    let r: 'LOW' | 'MEDIUM' | 'HIGH' | 'UNKNOWN' = 'UNKNOWN';
+    if (rawR === 'LOW' || rawR === 'MEDIUM' || rawR === 'HIGH') {
+      r = rawR;
+    }
+    const s = typeof asset.cryptavistaScore === 'number'
+      ? asset.cryptavistaScore
+      : (r === 'LOW' ? 20 : r === 'MEDIUM' ? 60 : r === 'HIGH' ? 100 : null);
     const c = asset.cryptavistaQuantumClassification === 'QUANTUM_SAFE'
       ? 'Quantum Safe'
       : asset.cryptavistaQuantumClassification === 'QUANTUM_RESISTANT'
@@ -105,6 +114,9 @@ function getCryptavistaPosture(asset: AssetRecord): {
 
   // Pure deterministic client-side evaluation fallback
   const name = (asset.assetName || asset.algorithm || '').toUpperCase();
+  const normKeySize = asset.keySize 
+    ? Number(asset.keySize) 
+    : (asset.version && !isNaN(Number(asset.version)) ? Number(asset.version) : undefined);
   
   if (name.includes('ML-KEM') || name.includes('MLKEM') || name.includes('ML-DSA') || name.includes('SLH-DSA')) {
     return {
@@ -124,7 +136,7 @@ function getCryptavistaPosture(asset: AssetRecord): {
     };
   }
 
-  if (name.includes('AES-128') || name.includes('AES128')) {
+  if (name.includes('AES-128') || name.includes('AES128') || (name.includes('AES') && normKeySize === 128)) {
     return {
       risk: 'MEDIUM',
       score: 60,
@@ -133,12 +145,21 @@ function getCryptavistaPosture(asset: AssetRecord): {
     };
   }
 
-  if (name.includes('AES-192') || name.includes('AES-256') || name.includes('AES192') || name.includes('AES256') || name.includes('SHA256') || name.includes('SHA-256') || name.includes('SHA512') || name.includes('SHA-512') || name.includes('SHA3') || name.includes('HMAC') || name.includes('CHACHA20')) {
+  if (name.includes('AES-192') || name.includes('AES-256') || name.includes('AES192') || name.includes('AES256') || (name.includes('AES') && (normKeySize === 256 || normKeySize === 192)) || name.includes('SHA256') || name.includes('SHA-256') || name.includes('SHA512') || name.includes('SHA-512') || name.includes('SHA3') || name.includes('HMAC') || name.includes('CHACHA20')) {
     return {
       risk: 'LOW',
       score: 20,
       classification: 'Quantum Resistant',
       reason: "CRYPTAVISTA classifies this primitive as Low Quantum Risk based on NIST's analysis of symmetric cryptography and quantum attacks."
+    };
+  }
+
+  if (name.includes('AES')) {
+    return {
+      risk: 'MEDIUM',
+      score: 60,
+      classification: 'Quantum Resistant',
+      reason: "CRYPTAVISTA evaluates unversioned AES as Medium Quantum Risk (60) pending verified 256-bit key evidence."
     };
   }
 
@@ -200,7 +221,7 @@ export default function Classification({ selectedAnalysisId, onSelectAnalysis, a
           <div>
             <div className="text-[15px] font-bold text-[#1e3a5f]">Cryptographic Asset Classification</div>
             <div className="text-[12px] text-[#6b7589]">
-              Dual-layer classification: Original CBOMKit compliance results paired with the CRYPTAVISTA Quantum Risk model.
+              Dual-layer classification: Original CBOM compliance results paired with the CRYPTAVISTA Quantum Risk model.
             </div>
           </div>
           <div className="flex items-center gap-3">
@@ -250,16 +271,22 @@ export default function Classification({ selectedAnalysisId, onSelectAnalysis, a
                   </div>
                 </div>
                 <div className="text-[11px] text-[#6b7589] hidden sm:block">
-                  Original CBOMKit classifications are preserved; CRYPTAVISTA adds independent Quantum Risk scoring.
+                  Original CBOM classifications are preserved; CRYPTAVISTA adds independent Quantum Risk scoring.
                 </div>
               </div>
 
               <div className="divide-y divide-[#eef0f3]">
                 {assets.map((item: AssetRecord, idx: number) => {
                   const cbomkit = getCbomkitDisplay(item);
-                  const posture = getCryptavistaPosture(item);
-                  const riskCfg = RISK_CONFIG[posture.risk] || RISK_CONFIG.UNKNOWN;
-                  const isPqc = posture.classification === 'Quantum Safe';
+                  const qRiskInfo = getCryptavistaQuantumRisk(item);
+                  const riskCfg = RISK_CONFIG[qRiskInfo.risk] || RISK_CONFIG.UNKNOWN;
+                  const isPqc = qRiskInfo.classification === 'Quantum Safe';
+                  const displayReason = qRiskInfo.reason
+                    ? qRiskInfo.reason
+                        .replace(/Classical Risk is High\/Legacy; /gi, '')
+                        .replace(/classical legacy cipher/gi, 'classical cipher')
+                        .replace(/Legacy \/ High/gi, 'Standard')
+                    : '';
 
                   return (
                     <div key={item.assetId || idx} className="bg-white p-5 hover:bg-[#fafbfc] transition-colors">
@@ -272,11 +299,11 @@ export default function Classification({ selectedAnalysisId, onSelectAnalysis, a
                             borderColor: `${riskCfg.hex}40`
                           }}
                         >
-                          {posture.risk === 'HIGH' ? (
+                          {qRiskInfo.risk === 'HIGH' ? (
                             <AlertCircle size={18} style={{ color: riskCfg.hex }} />
-                          ) : posture.risk === 'MEDIUM' ? (
+                          ) : qRiskInfo.risk === 'MEDIUM' ? (
                             <AlertTriangle size={18} style={{ color: riskCfg.hex }} />
-                          ) : posture.risk === 'LOW' ? (
+                          ) : qRiskInfo.risk === 'LOW' ? (
                             <CheckCircle2 size={18} style={{ color: riskCfg.hex }} />
                           ) : (
                             <HelpCircle size={18} style={{ color: riskCfg.hex }} />
@@ -293,7 +320,7 @@ export default function Classification({ selectedAnalysisId, onSelectAnalysis, a
 
                             {/* CBOMKit Original Classification - Neutral Badge */}
                             <span className="inline-flex items-center gap-1 text-[10px] font-semibold border px-2 py-0.5 rounded-full bg-slate-100 text-slate-700 border-slate-300">
-                              <span className="text-slate-400 uppercase tracking-wider text-[9px]">CBOMKit:</span>
+                              <span className="text-slate-400 uppercase tracking-wider text-[9px]">CBOM:</span>
                               {cbomkit.label}
                             </span>
 
@@ -315,7 +342,7 @@ export default function Classification({ selectedAnalysisId, onSelectAnalysis, a
                               }}
                             >
                               <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: riskCfg.hex }}></span>
-                              Quantum Risk: {riskCfg.label} {posture.score !== null ? `(${posture.score})` : ''}
+                              Quantum Risk: {riskCfg.label} {qRiskInfo.score !== null ? `(${qRiskInfo.score})` : ''}
                             </span>
                           </div>
 
@@ -334,7 +361,7 @@ export default function Classification({ selectedAnalysisId, onSelectAnalysis, a
                             {/* Card 2: CBOMKit Original Classification */}
                             <div className="bg-[#f5f6f8] rounded-md px-3 py-2 border border-[#eaecee]">
                               <div className="text-[9px] text-[#6b7589] uppercase tracking-wide font-semibold mb-0.5">
-                                CBOMKit Classification
+                                CBOM Classification
                               </div>
                               <div className="text-[12px] font-semibold text-slate-700 truncate" title={cbomkit.label}>
                                 {cbomkit.label}
@@ -350,7 +377,7 @@ export default function Classification({ selectedAnalysisId, onSelectAnalysis, a
                                 <span className="w-2 h-2 rounded-full" style={{ backgroundColor: riskCfg.hex }}></span>
                                 <span>{riskCfg.label}</span>
                                 <span className="text-[11px] font-semibold text-gray-600">
-                                  {posture.score !== null ? `· Score: ${posture.score}` : '· Score: —'}
+                                  {qRiskInfo.score !== null ? `· Score: ${qRiskInfo.score}` : '· Score: —'}
                                 </span>
                               </div>
                             </div>
@@ -366,11 +393,11 @@ export default function Classification({ selectedAnalysisId, onSelectAnalysis, a
                             </div>
                           </div>
 
-                          {/* Technical Posture Reason */}
-                          {posture.reason && (
+                          {/* Technical Reason */}
+                          {displayReason && (
                             <div className="mt-2.5 text-[11px] text-[#556070] bg-[#f9fafb] border border-[#eef0f3] rounded px-3 py-1.5 flex items-center gap-1.5">
                               <Cpu size={12} className="text-[#8892a0] shrink-0" />
-                              <span className="leading-tight">{posture.reason}</span>
+                              <span className="leading-tight">{displayReason}</span>
                             </div>
                           )}
                         </div>

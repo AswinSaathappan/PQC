@@ -1,24 +1,10 @@
 <template>
-  <div>
-    <c4d-footer-container
-    size="short"
-    disable-locale-button="true"
-  >
-  </c4d-footer-container>
-  </div>
+  <div></div>
 </template>
 
 <script>
-import { model } from "@/model.js";
-import '@carbon/ibmdotcom-web-components/es/components/footer/footer-container';
-
 export default {
-  name: "ReturnButton",
-  data() {
-    return {
-      model,
-    };
-  },
+  name: "FooterView",
 };
 </script>
 

@@ -1,5 +1,5 @@
 import React, { useState, useEffect, Fragment } from "react";
-import { ChevronDown, ChevronRight, Loader2, ShieldAlert, Layers } from "lucide-react";
+import { ChevronDown, ChevronRight, Loader2, ShieldAlert, Layers, AlertTriangle } from "lucide-react";
 import axios from "axios";
 
 interface GlobalAnalysis {
@@ -40,6 +40,7 @@ interface ScoredAsset {
     quantumRiskClassification: string;
     quantumRiskText: string;
     quantumRiskReason: string;
+    classicalRisk?: string;
     dependencyImpact: number | null;
     dependencyImpactText: string;
     dependencyReach: number;
@@ -55,8 +56,10 @@ interface ScoredAsset {
     isPartial: boolean;
     priorityClassification: string;
     action: string;
+    cpsExplanation?: string;
     isUnknown: boolean;
     isNotApplicable: boolean;
+    isContextDependent?: boolean;
   };
 }
 
@@ -160,6 +163,8 @@ export default function PriorityAnalysis({ selectedAnalysisId, onSelectAnalysis,
   // Calculate occurrences summary
   const uniqueAssetsCount = assets.length;
   const cbomOccurrencesCount = assets.reduce((sum, a) => sum + (a.occurrencesCount || 1), 0);
+  const numericScoredCount = assets.filter(a => !a.scores.isNotApplicable && !a.scores.isContextDependent && a.scores.priorityScore !== null).length;
+  const nonNumericCount = assets.filter(a => a.scores.isNotApplicable || a.scores.isContextDependent || a.scores.priorityScore === null).length;
 
   const toggleRow = (id: string) => {
     setExpandedRowIds(prev => {
@@ -271,7 +276,7 @@ export default function PriorityAnalysis({ selectedAnalysisId, onSelectAnalysis,
                 Component Priority Table — {appDisplayName}
               </div>
               <div className="text-xs font-semibold text-[#1e3a5f] mt-0.5">
-                {uniqueAssetsCount} unique assets • {cbomOccurrencesCount} CBOM occurrences
+                Total Cryptographic Asset Occurrences: {cbomOccurrencesCount} • Total Unique Logical Assets: {uniqueAssetsCount} ({numericScoredCount} Numeric Priority-Scored, {nonNumericCount} Non-Numeric / Evidence-Required)
               </div>
             </div>
             <div className="text-[11px] text-[#6b7589]">
@@ -284,17 +289,55 @@ export default function PriorityAnalysis({ selectedAnalysisId, onSelectAnalysis,
               <Loader2 className="animate-spin text-[#1e3a5f]" size={32} />
               <div className="text-xs text-[#6b7589]">Loading component priority data…</div>
             </div>
-          ) : assets.length === 0 ? (
-            <div className="p-12 text-center">
-              <div className="w-12 h-12 rounded-full bg-blue-50 border border-blue-200 flex items-center justify-center mx-auto mb-3 text-[#1e3a5f]">
-                <ShieldAlert size={22} />
+          ) : assets.length === 0 ? (() => {
+            const appStatus = currentApp?.status || (fallbackApp as any)?.status;
+            const appError = (currentApp as any)?.errorMessage || (fallbackApp as any)?.errorMessage;
+
+            if (appStatus === 'FAILED') {
+              return (
+                <div className="p-12 text-center">
+                  <div className="w-12 h-12 rounded-full bg-red-50 border border-red-200 flex items-center justify-center mx-auto mb-3 text-red-600">
+                    <AlertTriangle size={22} />
+                  </div>
+                  <h3 className="text-sm font-bold text-red-800 mb-1">Cryptographic Analysis Failed</h3>
+                  <p className="text-xs text-[#6b7589] max-w-sm mx-auto mb-3">
+                    The cryptographic analysis encountered an error during processing.
+                  </p>
+                  {appError && (
+                    <div className="max-w-md mx-auto text-xs font-mono text-red-700 bg-red-50 p-2.5 rounded border border-red-200 break-all text-left">
+                      {appError}
+                    </div>
+                  )}
+                </div>
+              );
+            }
+
+            if (appStatus === 'RUNNING' || appStatus === 'CREATED') {
+              return (
+                <div className="p-12 text-center">
+                  <div className="w-12 h-12 rounded-full bg-blue-50 border border-blue-200 flex items-center justify-center mx-auto mb-3 text-[#1e3a5f]">
+                    <Loader2 className="animate-spin" size={22} />
+                  </div>
+                  <h3 className="text-sm font-bold text-[#1e3a5f] mb-1">Cryptographic Analysis in Progress</h3>
+                  <p className="text-xs text-[#6b7589] max-w-sm mx-auto">
+                    Cryptographic discovery and risk assessment are currently underway. Results will appear here once analysis completes.
+                  </p>
+                </div>
+              );
+            }
+
+            return (
+              <div className="p-12 text-center">
+                <div className="w-12 h-12 rounded-full bg-blue-50 border border-blue-200 flex items-center justify-center mx-auto mb-3 text-[#1e3a5f]">
+                  <ShieldAlert size={22} />
+                </div>
+                <h3 className="text-sm font-bold text-[#1a1d23] mb-1">No Cryptographic Assets Detected</h3>
+                <p className="text-xs text-[#6b7589] max-w-sm mx-auto">
+                  No cryptographic components were discovered for the selected application.
+                </p>
               </div>
-              <h3 className="text-sm font-bold text-[#1a1d23] mb-1">No Cryptographic Assets Detected</h3>
-              <p className="text-xs text-[#6b7589] max-w-sm mx-auto">
-                No cryptographic components were discovered for the selected application.
-              </p>
-            </div>
-          ) : (
+            );
+          })() : (
             <div className="overflow-x-auto">
               <table className="w-full min-w-[960px] text-xs">
                 <thead>
@@ -340,7 +383,9 @@ export default function PriorityAnalysis({ selectedAnalysisId, onSelectAnalysis,
                               ) : (
                                 <ChevronRight size={14} className="text-gray-400" />
                               )}
-                              <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border inline-block ${rankBadge[rankNum] || rankBadge[5]}`}>
+                              <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border inline-block ${
+                                isUnavailable ? "—" : (rankBadge[rankNum] || rankBadge[5])
+                              }`}>
                                 {isUnavailable ? "—" : `P${rankNum}`}
                               </span>
                             </div>
@@ -504,7 +549,7 @@ export default function PriorityAnalysis({ selectedAnalysisId, onSelectAnalysis,
                                         </div>
                                       )}
                                     </div>
-                                    <div className="mt-3 pt-2 border-t border-gray-100 text-[11px] text-[#6b7589]">
+                                    <div className="mt-3 pt-2 border-t border-gray-100 text-[11px]">
                                       <span className="font-semibold text-gray-700 block mb-0.5">Calculation:</span>
                                       <span className="font-mono text-gray-800 text-[10px]">
                                         {a.scores.dependencyCalculation}

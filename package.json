@@ -12,11 +12,15 @@
   "dependencies": {
     "@types/cytoscape": "^3.31.0",
     "@types/d3": "^7.4.3",
+    "axios": "^1.20.0",
     "cytoscape": "^3.34.2",
     "d3": "^7.9.0",
     "jspdf": "^4.2.1",
     "jspdf-autotable": "^5.0.8",
+    "jszip": "^3.10.1",
     "lucide-react": "^1.39.0",
+    "mongodb": "^7.6.0",
+    "mongoose": "^9.9.5",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "recharts": "^3.10.1"

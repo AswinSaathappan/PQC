@@ -31,7 +31,6 @@
         </div>
       </div> -->
     </div>
-    <FooterView />
   </div>
 </template>
 

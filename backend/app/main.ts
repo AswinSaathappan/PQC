@@ -1,5 +1,12 @@
-import 'dotenv/config';
-import express from 'express';
+import dotenv from 'dotenv';
+import path from 'path';
+
+// Ensure backend/.env is loaded regardless of process.cwd() or startup directory
+dotenv.config({ path: path.resolve(__dirname, '../.env') });
+dotenv.config({ path: path.resolve(process.cwd(), 'backend/.env') });
+dotenv.config({ path: path.resolve(process.cwd(), '.env') });
+
+import express, { Request, Response } from 'express';
 import cors from 'cors';
 import { connectDB } from './database/mongodb';
 import analysesRouter from './api/analyses';
@@ -61,18 +68,56 @@ async function syncFromCbomkitIfEmpty() {
   }
 }
 
-// Connect to MongoDB & sync if needed
-connectDB().then(() => {
-  syncFromCbomkitIfEmpty();
-});
-
 // Routes
 app.use('/api/analyses', analysesRouter);
 
-app.get('/health', (req, res) => {
+app.get('/health', (req: Request, res: Response) => {
   res.json({ status: 'ok' });
 });
 
-app.listen(port, () => {
-  console.log(`ECDAT Backend listening at http://localhost:${port}`);
-});
+// Connect to MongoDB & start server
+async function startServer() {
+  try {
+    await connectDB();
+    await syncFromCbomkitIfEmpty();
+    app.listen(port, () => {
+      console.log(`ECDAT Backend listening at http://localhost:${port}`);
+      // Non-blocking sync of existing completed analyses to CBOMKit backend
+      syncExistingAnalysesToCbomkit().catch(() => {});
+    });
+  } catch (error) {
+    console.error('Failed to start server:', error);
+    process.exit(1);
+  }
+}
+
+async function syncExistingAnalysesToCbomkit() {
+  try {
+    const { Cbom } = await import('./models/cbom');
+    const cbomDocs = await Cbom.find({}, { analysisId: 1, rawJson: 1 }).lean();
+    if (!cbomDocs || cbomDocs.length === 0) return;
+
+    const axios = (await import('axios')).default;
+    let synced = 0;
+    for (const doc of cbomDocs) {
+      if (!doc.analysisId || !doc.rawJson) continue;
+      try {
+        await axios.post(
+          `http://localhost:8081/api/v1/cbom/${encodeURIComponent(doc.analysisId)}`,
+          doc.rawJson,
+          { headers: { 'Content-Type': 'application/json' }, timeout: 2000 }
+        );
+        synced++;
+      } catch {
+        // Safe skip on individual item
+      }
+    }
+    if (synced > 0) {
+      console.log(`[Sync] Synchronized ${synced} authoritative CBOMs to CBOMKit backend on port 8081.`);
+    }
+  } catch (err) {
+    console.warn('[Sync] Non-blocking notice: Could not sync existing CBOMs to CBOMKit:', (err as Error).message);
+  }
+}
+
+startServer();

@@ -42,18 +42,85 @@ export interface GlobalAnalysis {
   status: string;
 }
 
-export default function App() {
-  const [activePage, setActivePage] = useState("overview");
-  const [analyses, setAnalyses] = useState<GlobalAnalysis[]>([]);
-  const [selectedAnalysisId, setSelectedAnalysisId] = useState<string>("");
+const STORAGE_KEY = "cryptavista_selected_analysis_id";
 
-  const refreshAnalyses = () => {
+export default function App() {
+  const [activePage, setActivePage] = useState<string>(() => {
+    try {
+      const params = new URLSearchParams(window.location.search);
+      let p = params.get("page");
+      if (p) return decodeURIComponent(p);
+      if (window.location.hash) {
+        return decodeURIComponent(window.location.hash.replace(/^#\/?/, ""));
+      }
+    } catch {
+      // ignore
+    }
+    return "overview";
+  });
+  const [analyses, setAnalyses] = useState<GlobalAnalysis[]>([]);
+  const [selectedAnalysisId, setSelectedAnalysisId] = useState<string>(() => {
+    try {
+      const params = new URLSearchParams(window.location.search);
+      let p = params.get("page");
+      if (p) {
+        p = decodeURIComponent(p);
+        if (p.startsWith("cbom:")) return p.split(":")[1];
+        if (p.startsWith("cbomkit_discovery:")) return p.split(":")[1];
+      }
+      return localStorage.getItem(STORAGE_KEY) || "";
+    } catch {
+      return "";
+    }
+  });
+
+  const handleSelectAnalysis = (id: string) => {
+    if (!id) return;
+    setSelectedAnalysisId(id);
+    try {
+      localStorage.setItem(STORAGE_KEY, id);
+    } catch (e) {
+      console.warn("Could not save selected analysis to localStorage", e);
+    }
+    const decodedActive = decodeURIComponent(activePage);
+    if (decodedActive.startsWith("cbom")) {
+      setActivePage(`cbom:${id}`);
+      try {
+        const url = new URL(window.location.href);
+        url.searchParams.set("page", `cbom:${id}`);
+        window.history.replaceState({}, "", url.toString());
+      } catch {
+        // ignore
+      }
+    }
+  };
+
+  const refreshAnalyses = (preferredId?: string) => {
     fetch("http://localhost:3001/api/analyses")
       .then(r => r.json())
-      .then(data => {
+      .then((data: GlobalAnalysis[]) => {
         setAnalyses(data);
-        if (data.length > 0 && !selectedAnalysisId) {
-          setSelectedAnalysisId(data[0].analysisId);
+        if (data.length > 0) {
+          let targetId: string | null = null;
+          try {
+            const params = new URLSearchParams(window.location.search);
+            let p = params.get("page");
+            if (p) p = decodeURIComponent(p);
+            const urlId = p && (p.startsWith("cbom:") || p.startsWith("cbomkit_discovery:")) ? p.split(":")[1] : null;
+            targetId = preferredId || urlId || localStorage.getItem(STORAGE_KEY) || selectedAnalysisId;
+          } catch {
+            targetId = preferredId || selectedAnalysisId;
+          }
+
+          if (targetId) {
+            const matched = data.find(a => a.analysisId === targetId);
+            if (matched) {
+              handleSelectAnalysis(matched.analysisId);
+              return;
+            }
+          }
+
+          handleSelectAnalysis(data[0].analysisId);
         }
       })
       .catch(err => console.error("Failed to load analyses", err));
@@ -63,15 +130,28 @@ export default function App() {
     refreshAnalyses();
   }, []);
   
-  let activePageKey = activePage;
+  const decodedActivePage = decodeURIComponent(activePage);
+  let activePageKey = decodedActivePage;
   let pageParam = "";
-  if (activePage.startsWith("cbomkit_discovery:")) {
+  if (decodedActivePage.startsWith("cbomkit_discovery:")) {
     activePageKey = "cbomkit_discovery";
-    pageParam = activePage.split(":")[1];
-  } else if (activePage.startsWith("cbom:")) {
+    pageParam = decodedActivePage.split(":")[1];
+  } else if (decodedActivePage.startsWith("cbom:")) {
     activePageKey = "cbom";
-    pageParam = activePage.split(":")[1];
+    pageParam = decodedActivePage.split(":")[1];
   }
+
+  // Synchronize route param analysis ID with global selected analysis only when pageParam changes
+  useEffect(() => {
+    if (pageParam && pageParam !== selectedAnalysisId) {
+      setSelectedAnalysisId(pageParam);
+      try {
+        localStorage.setItem(STORAGE_KEY, pageParam);
+      } catch (e) {
+        console.warn("Could not save selected analysis to localStorage", e);
+      }
+    }
+  }, [pageParam]);
 
   const page = pageConfig[activePageKey] ?? pageConfig.overview;
   
@@ -84,7 +164,7 @@ export default function App() {
     selectedAnalysisId?: string; // from global dropdown
     analyses?: GlobalAnalysis[];
     onSelectAnalysis?: (id: string) => void;
-    refreshAnalyses?: () => void;
+    refreshAnalyses?: (preferredId?: string) => void;
   }>;
 
   const handleNewAnalysis = () => setActivePage("newanalysis");
@@ -104,7 +184,7 @@ export default function App() {
             onNewAnalysis={handleNewAnalysis}
             analyses={analyses}
             selectedAnalysisId={selectedAnalysisId}
-            onSelectAnalysis={setSelectedAnalysisId}
+            onSelectAnalysis={handleSelectAnalysis}
           />
         )}
         <PageComponent 
@@ -113,7 +193,7 @@ export default function App() {
           onComplete={handleComplete} 
           analysisId={pageParam} 
           selectedAnalysisId={selectedAnalysisId}
-          onSelectAnalysis={setSelectedAnalysisId}
+          onSelectAnalysis={handleSelectAnalysis}
           analyses={analyses}
           refreshAnalyses={refreshAnalyses}
         />

@@ -10,6 +10,9 @@ import { CryptavistaClassifier } from '../services/cryptavista_classifier';
 import { RuntimeEvent } from '../models/runtime_event';
 import { Recommendation } from '../models/recommendation';
 import { RecommendationAdvisor } from '../services/recommendation_advisor';
+import { TargetService } from '../services/target_service';
+import { LocalScanner } from '../services/local_scanner';
+import fs from 'fs';
 
 const router = express.Router();
 const upload = multer({ dest: 'uploads/' });
@@ -17,7 +20,7 @@ const upload = multer({ dest: 'uploads/' });
 // Create a new analysis
 router.post('/', upload.single('file'), async (req: Request, res: Response): Promise<void> => {
   try {
-    const { applicationName, dataSensitivity, businessCriticality, dataProtectionDuration, runtimeEnabled, repositoryUrl, threatHorizonYear, migrationDuration } = req.body;
+    const { applicationName, dataSensitivity, businessCriticality, dataProtectionDuration, runtimeEnabled, repositoryUrl, threatHorizonYear, migrationDuration, targetType, branch, commit } = req.body;
     
     if (!applicationName) {
       res.status(400).json({ error: 'applicationName is required' });
@@ -27,12 +30,15 @@ router.post('/', upload.single('file'), async (req: Request, res: Response): Pro
     const analysisId = 'ECDAT-' + uuidv4().substring(0, 8).toUpperCase();
     const parsedHorizonYear = Number(threatHorizonYear) || 2036;
     const derivedZ = parsedHorizonYear - 2026;
+    const resolvedTargetType = targetType || (req.file ? 'folder' : 'source_code');
 
     const analysis = new Analysis({
       analysisId,
       applicationName,
-      targetType: 'source_code',
+      targetType: resolvedTargetType,
       repositoryUrl,
+      gitBranch: branch || (repositoryUrl ? 'main' : undefined),
+      gitCommit: commit,
       uploadedFileReference: req.file ? req.file.path : undefined,
       dataSensitivity: Number(dataSensitivity) || 1,
       businessCriticality: Number(businessCriticality) || 1,
@@ -46,13 +52,63 @@ router.post('/', upload.single('file'), async (req: Request, res: Response): Pro
 
     await analysis.save();
 
-    // Start background processing
-    processAnalysis(analysisId, repositoryUrl, req.file?.path);
+    // Start background processing:
+    // For folder: wait until folder archive is uploaded.
+    // For source_code / Git: start processAnalysis so it waits for CBOMKit scan result when user scans in CBOMKit.
+    if (resolvedTargetType === 'source_code' || repositoryUrl || req.file?.path) {
+      processAnalysis(analysisId, repositoryUrl, req.file?.path, resolvedTargetType, branch, commit);
+    }
 
     res.status(201).json(analysis);
   } catch (error) {
     console.error('Error creating analysis:', error);
     res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
+// Trigger scan on existing analysis (from CBOM page)
+router.post('/:id/scan', upload.single('file'), async (req: Request, res: Response): Promise<void> => {
+  try {
+    const analysisId = String(req.params.id);
+    const analysis = await Analysis.findOne({ analysisId });
+    if (!analysis) {
+      res.status(404).json({ error: 'Analysis not found' });
+      return;
+    }
+
+    const { repositoryUrl, branch, commit } = req.body;
+    const uploadedFilePath = req.file?.path;
+    const resolvedTargetType = (analysis.targetType === 'folder' || req.file) ? 'folder' : 'source_code';
+
+    const updateDoc: any = {
+      status: 'RUNNING',
+      currentStage: 'DISCOVER',
+      'stages.discover.status': 'RUNNING',
+      'stages.discover.startedAt': new Date(),
+      errorMessage: null
+    };
+    if (repositoryUrl) {
+      updateDoc.repositoryUrl = repositoryUrl.trim();
+    }
+    if (branch) {
+      updateDoc.gitBranch = branch.trim();
+    }
+    if (commit) {
+      updateDoc.gitCommit = commit.trim();
+    }
+    if (uploadedFilePath) {
+      updateDoc.uploadedFileReference = uploadedFilePath;
+    }
+
+    await Analysis.updateOne({ analysisId }, { $set: updateDoc });
+
+    const effectiveRepoUrl = (repositoryUrl && repositoryUrl.trim()) || analysis.repositoryUrl;
+    processAnalysis(analysisId, effectiveRepoUrl, uploadedFilePath, resolvedTargetType, branch, commit);
+
+    res.json({ success: true, status: 'RUNNING', analysisId });
+  } catch (error) {
+    console.error('Error starting scan:', error);
+    res.status(500).json({ error: 'Failed to start scan', detail: String(error) });
   }
 });
 
@@ -93,7 +149,14 @@ router.get('/:id/status', async (req: Request, res: Response): Promise<void> => 
     stages: analysis.stages,
     errorMessage: analysis.errorMessage,
     runtimeEnabled: analysis.runtimeEnabled,
-    detectedCryptoAssetCount: analysis.detectedCryptoAssetCount ?? analysis.stages?.discover?.assetCount ?? 0
+    detectedCryptoAssetCount: analysis.detectedCryptoAssetCount ?? analysis.stages?.discover?.assetCount ?? 0,
+    scannedFiles: analysis.scannedFiles ?? 0,
+    scannedLines: analysis.scannedLines ?? 0,
+    gitBranch: analysis.gitBranch,
+    gitCommit: analysis.gitCommit,
+    repositoryUrl: analysis.repositoryUrl,
+    applicationName: analysis.applicationName,
+    targetType: analysis.targetType
   });
 });
 
@@ -114,6 +177,12 @@ router.get('/:id/cbom', async (req: Request, res: Response): Promise<void> => {
     res.status(404).json({ error: 'CBOM not found' });
     return;
   }
+  // Ensure synced to CBOMKit backend (port 8081) for visualization
+  axios.post(
+    `http://localhost:8081/api/v1/cbom/${encodeURIComponent(String(req.params.id))}`,
+    cbom.rawJson,
+    { headers: { 'Content-Type': 'application/json' }, timeout: 2000 }
+  ).catch(() => {});
   res.json(cbom.rawJson);
 });
 
@@ -171,19 +240,36 @@ router.get('/:id/assets', async (req: Request, res: Response): Promise<void> => 
   res.json(assets);
 });
 
-// Re-process stored CBOM JSON without re-scanning — useful to apply parser fixes to existing data
+// Re-process stored CBOM JSON or re-scan extracted disk directory — useful to apply parser/scanner fixes to existing data
 router.post('/:id/reprocess', async (req: Request, res: Response): Promise<void> => {
   try {
     const analysisId = String(req.params.id);
-    const cbomDoc = await Cbom.findOne({ analysisId });
-    if (!cbomDoc) {
-      res.status(404).json({ error: 'No CBOM found for this analysis. Run a scan first.' });
-      return;
+    const scanDir = TargetService.getTargetDir(analysisId);
+    let cbomJson: any = null;
+
+    if (fs.existsSync(scanDir)) {
+      console.log(`[Reprocess: ${analysisId}] Re-scanning extracted target directory: ${scanDir}`);
+      cbomJson = await LocalScanner.scanDirectory(scanDir);
+    } else {
+      const cbomDoc = await Cbom.findOne({ analysisId });
+      if (!cbomDoc) {
+        res.status(404).json({ error: 'No extracted files or CBOM found for this analysis. Run a scan first.' });
+        return;
+      }
+      cbomJson = cbomDoc.rawJson;
     }
-    const count = await CbomkitAdapter.processOfficialCbom(analysisId, cbomDoc.rawJson);
+
+    const count = await CbomkitAdapter.processOfficialCbom(analysisId, cbomJson);
     await Analysis.updateOne(
       { analysisId },
-      { $set: { 'stages.discover.assetCount': count, detectedCryptoAssetCount: count } }
+      { 
+        $set: { 
+          'stages.discover.assetCount': count, 
+          detectedCryptoAssetCount: count,
+          status: 'COMPLETED',
+          'stages.discover.status': 'COMPLETED'
+        } 
+      }
     );
     res.json({ success: true, assetCount: count, detectedCryptoAssetCount: count });
   } catch (err) {
@@ -307,10 +393,100 @@ const getQuantumRiskInfo = (
     risk?: string;
     score?: number | null;
     reason?: string;
-  }
+  },
+  keySizeEvidence?: number | string | null
 ) => {
+  const normType = (assetType || '').toLowerCase();
+  const rawAlg = (algorithm || '').trim();
+  const rawName = (assetName || '').trim();
+  const upperAlg = rawAlg.toUpperCase();
+  const upperName = rawName.toUpperCase();
+  const prim = (primitive || '').toLowerCase().trim();
+
+  // 1. Classical Legacy Ciphers (3DES, RC4, DES) - Outside quantum threat model
+  const is3Des = upperAlg.includes('3DES') || upperName.includes('3DES') || upperAlg.includes('DES3') || upperName.includes('DES3') || upperAlg.includes('TRIPLEDES') || upperName.includes('TRIPLEDES');
+  const isRc4 = upperAlg.includes('RC4') || upperName.includes('RC4') || upperAlg.includes('ARCFOUR') || upperName.includes('ARCFOUR');
+  const isDes = !is3Des && (upperAlg === 'DES' || upperName === 'DES' || upperAlg.startsWith('DES-') || upperName.startsWith('DES-') || upperAlg.startsWith('DES/') || upperName.startsWith('DES/') || upperAlg.endsWith('-DES') || upperName.endsWith('-DES'));
+
+  if (is3Des || isRc4 || isDes) {
+    const cipherName = is3Des ? '3DES' : isRc4 ? 'RC4' : 'DES';
+    const vulnDesc = is3Des 
+      ? 'Sweet32 64-bit block collision vulnerability and NIST SP 800-131A Rev. 2 deprecation'
+      : isRc4 
+      ? 'keystream statistical bias vulnerabilities and RFC 7465 prohibition'
+      : 'inadequate 56-bit key length and exhaustive key-search vulnerability';
+
+    return {
+      risk: 'Unknown',
+      score: null,
+      notApplicable: true,
+      isUnknown: true,
+      isContextDependent: false,
+      reason: `Quantum risk is not applicable to ${cipherName}; evaluated under classical deprecation models due to ${vulnDesc}.`
+    };
+  }
+
+  // 2. PBKDF2 / Key Derivation Functions - Context-Dependent quantum and configuration risk
+  const isPbkdf2 = upperAlg.includes('PBKDF2') || upperName.includes('PBKDF2') || prim === 'kdf' || upperAlg.includes('PBKDF') || upperName.includes('PBKDF');
+  if (isPbkdf2) {
+    return {
+      risk: 'Unknown',
+      score: null,
+      notApplicable: false,
+      isUnknown: true,
+      isContextDependent: true,
+      reason: 'Quantum risk score is context-dependent for key derivation functions (PBKDF2); security depends on the underlying PRF (hash function), output key length, iteration count (work factor), and salt entropy.'
+    };
+  }
+
+  // Verify AES key size from evidence before assigning risk score. Do not infer key size from name alone.
+  const parsedKeySize = keySizeEvidence ? Number(keySizeEvidence) : undefined;
+  const isAes = upperAlg.includes('AES') || upperName.includes('AES') || prim === 'ae' || prim === 'block-cipher';
+  const detectedKeySize = parsedKeySize || (upperName.includes('256') || upperAlg.includes('256') ? 256 : upperName.includes('192') || upperAlg.includes('192') ? 192 : upperName.includes('128') || upperAlg.includes('128') ? 128 : undefined);
+  if (isAes && detectedKeySize) {
+    if (detectedKeySize >= 256 || detectedKeySize === 192) {
+      return {
+        risk: 'Low',
+        score: 20,
+        notApplicable: false,
+        isUnknown: false,
+        isContextDependent: false,
+        reason: `CRYPTAVISTA classifies ${rawName || rawAlg} with verified ${detectedKeySize}-bit key (from CBOM evidence) as Low Quantum Risk (20) based on NIST's analysis of symmetric cryptography and quantum attacks (128-bit post-quantum security against Grover's algorithm).`
+      };
+    } else if (detectedKeySize === 128) {
+      return {
+        risk: 'Medium',
+        score: 60,
+        notApplicable: false,
+        isUnknown: false,
+        isContextDependent: false,
+        reason: `CRYPTAVISTA classifies ${rawName || rawAlg} with verified 128-bit key (from CBOM evidence) as Medium Quantum Risk (60) based on NIST's analysis of symmetric cryptography and quantum attacks (Grover's algorithm reduces effective security to 64 bits).`
+      };
+    }
+  }
+
   if (existingRisk && existingRisk.risk) {
     const r = existingRisk.risk.toUpperCase();
+    if (r === 'NOT_APPLICABLE' || r === 'NA') {
+      return {
+        risk: 'Unknown',
+        score: null,
+        notApplicable: true,
+        isUnknown: true,
+        isContextDependent: false,
+        reason: existingRisk.reason || 'Quantum risk is not applicable to this cipher; evaluated under classical deprecation models.'
+      };
+    }
+    if (r === 'CONTEXT_DEPENDENT') {
+      return {
+        risk: 'Unknown',
+        score: null,
+        notApplicable: false,
+        isUnknown: true,
+        isContextDependent: true,
+        reason: existingRisk.reason || 'Quantum risk score is context-dependent for key derivation functions (PBKDF2).'
+      };
+    }
     const s = existingRisk.score !== undefined ? existingRisk.score : (r === 'LOW' ? 20 : r === 'MEDIUM' ? 60 : r === 'HIGH' ? 100 : null);
     const displayRisk = r === 'LOW' ? 'Low' : r === 'MEDIUM' ? 'Medium' : r === 'HIGH' ? 'High' : 'Unknown';
     return {
@@ -318,13 +494,10 @@ const getQuantumRiskInfo = (
       score: s,
       notApplicable: false,
       isUnknown: r === 'UNKNOWN' || s === null,
+      isContextDependent: false,
       reason: existingRisk.reason || `CRYPTAVISTA risk model: ${displayRisk} (${s})`
     };
   }
-
-  const normType = (assetType || '').toLowerCase();
-  const rawAlg = (algorithm || '').trim();
-  const rawName = (assetName || '').trim();
 
   let effectiveAlg = rawAlg;
   let isInherited = false;
@@ -367,12 +540,35 @@ const getQuantumRiskInfo = (
 
   const match = CryptavistaClassifier.matchDeterministicAlgorithm(effectiveAlg);
   if (match) {
+    if (match.quantumRisk === 'NOT_APPLICABLE') {
+      return {
+        risk: 'Not Applicable',
+        score: null,
+        notApplicable: true,
+        isUnknown: false,
+        isContextDependent: false,
+        classicalRisk: 'Legacy / High',
+        reason: match.reason
+      };
+    }
+    if (match.quantumRisk === 'CONTEXT_DEPENDENT') {
+      return {
+        risk: 'Context-Dependent',
+        score: null,
+        notApplicable: false,
+        isUnknown: false,
+        isContextDependent: true,
+        classicalRisk: 'Configuration-Dependent',
+        reason: match.reason
+      };
+    }
     const displayRisk = match.quantumRisk === 'LOW' ? 'Low' : match.quantumRisk === 'MEDIUM' ? 'Medium' : match.quantumRisk === 'HIGH' ? 'High' : 'Unknown';
     return {
       risk: displayRisk,
       score: match.score,
       notApplicable: false,
       isUnknown: match.score === null,
+      isContextDependent: false,
       reason: isInherited 
         ? `${rawName} inherits ${displayRisk} quantum risk (${match.score}) from associated algorithm ${parentAlgName}.`
         : match.reason
@@ -380,13 +576,13 @@ const getQuantumRiskInfo = (
   }
 
   // Primitive check
-  const prim = (primitive || '').toLowerCase().trim();
   if (prim === 'pke' || (prim === 'signature' && !effectiveAlg.toUpperCase().includes('ML-DSA') && !effectiveAlg.toUpperCase().includes('SLH-DSA'))) {
     return {
       risk: 'High',
       score: 100,
       notApplicable: false,
       isUnknown: false,
+      isContextDependent: false,
       reason: `Classical public-key cryptographic mechanism vulnerable to Shor's algorithm.`
     };
   }
@@ -396,6 +592,7 @@ const getQuantumRiskInfo = (
     score: null, 
     notApplicable: false, 
     isUnknown: true, 
+    isContextDependent: false,
     reason: 'Cryptographic primitive or algorithm could not be determined from the available CBOM data.' 
   };
 };
@@ -420,14 +617,14 @@ const getCriticalityValue = (val?: string | number) => {
   return 25; // Low
 };
 
-// Calculate Mosca Urgency Score
+// Calculate Mosca Urgency Score (CRYPTAVISTA urgency scores derived from the Mosca timing relationship)
 const getMoscaScore = (X: number, Y: number, Z: number) => {
   const margin = Z - (X + Y);
   if (margin <= 0) return 100; // Critical
-  if (margin <= 2) return 85;  // Very High
-  if (margin <= 5) return 70;  // High
-  if (margin <= 10) return 50; // Medium
-  return 25; // Low
+  if (margin <= 2) return 75;  // Very High
+  if (margin <= 5) return 50;  // High
+  if (margin <= 10) return 25; // Medium
+  return 0; // Low
 };
 
 // Map Dependency Reach to Dependency Impact Score
@@ -455,6 +652,8 @@ function computeDependencyMetrics(cbomJson: any, assets: any[]) {
         assetType: a.assetType || 'algorithm',
         primitive: a.primitive || 'unspecified',
         algorithm: a.algorithm || name,
+        version: a.version,
+        keySize: a.keySize,
         occurrencesCount: 0,
         locations: [] as string[],
         occurrences: [] as any[],
@@ -497,12 +696,6 @@ function computeDependencyMetrics(cbomJson: any, assets: any[]) {
 
       const srcAsset = logicalMap.get(srcLogical);
       const tgtAsset = logicalMap.get(tgtLogical);
-
-      // Where CBOM evidence establishes a relationship between a related crypto-material/key and its algorithm:
-      const isKeyToAlg = (srcAsset?.assetType === 'related-crypto-material' && tgtAsset?.assetType === 'algorithm') ||
-                         (srcLogical.includes('key') && !tgtLogical.includes('key'));
-
-      if (!isKeyToAlg) continue;
 
       const edgeKey = `${srcLogical}->${tgtLogical}`;
       if (!logicalEdgesMap.has(edgeKey)) {
@@ -632,6 +825,281 @@ router.get('/scored/applications', async (req: Request, res: Response): Promise<
   res.json(result);
 });
 
+// Authoritative single-endpoint analysis summary: inventory, calculated aggregates, risk, classification, priorities, and recommendations
+router.get('/:id/summary', async (req: Request, res: Response): Promise<void> => {
+  try {
+    let analysisId = String(req.params.id);
+    let analysis = await Analysis.findOne({ analysisId });
+    if (!analysis) {
+      analysis = await Analysis.findById(analysisId).catch(() => null);
+      if (analysis) analysisId = analysis.analysisId;
+    }
+
+    if (!analysis) {
+      res.status(404).json({ error: 'Analysis not found' });
+      return;
+    }
+
+    const cbom = await Cbom.findOne({ analysisId });
+    const assets = await CryptoAsset.find({ analysisId }).sort({ assetName: 1, location: 1 });
+
+    const metrics = computeDependencyMetrics(cbom?.rawJson, assets);
+    const scoredAssets: any[] = [];
+
+    for (const [name, nodeData] of metrics.nodeMetrics.entries()) {
+      const sampleAsset = assets.find(a => (a.assetName || a.algorithm) === name);
+      const keySize = sampleAsset?.keySize || (sampleAsset?.version && !isNaN(Number(sampleAsset.version)) ? Number(sampleAsset.version) : undefined);
+      const existingRisk = sampleAsset?.cryptavistaQuantumRisk ? {
+        risk: sampleAsset.cryptavistaQuantumRisk,
+        score: sampleAsset.cryptavistaScore,
+        reason: sampleAsset.cryptavistaReason
+      } : undefined;
+
+      const qrInfo = getQuantumRiskInfo(
+        nodeData.assetType,
+        nodeData.primitive,
+        nodeData.algorithm || sampleAsset?.algorithm || name,
+        name,
+        nodeData.dependsOnList,
+        existingRisk,
+        keySize
+      );
+      const depScore = nodeData.dependencyImpactScore;
+
+      let priorityScore: number | null = null;
+      let isPartial = false;
+      let priorityClassification = 'Unavailable';
+      let action = 'Score unavailable — insufficient evidence';
+
+      if (typeof qrInfo.score === 'number' && typeof depScore === 'number') {
+        priorityScore = Number(((qrInfo.score + depScore) / 2).toFixed(1));
+      } else if (typeof qrInfo.score === 'number') {
+        priorityScore = qrInfo.score;
+        isPartial = true;
+      } else if (typeof depScore === 'number') {
+        priorityScore = depScore;
+        isPartial = true;
+      }
+
+      if (priorityScore !== null) {
+        if (priorityScore >= 75) {
+          priorityClassification = 'Urgent';
+          action = 'Prioritize Migration';
+        } else if (priorityScore >= 50) {
+          priorityClassification = 'High';
+          action = 'Plan Migration';
+        } else if (priorityScore >= 25) {
+          priorityClassification = 'Monitor';
+          action = 'Monitor & Prepare';
+        } else {
+          priorityClassification = 'Low';
+          action = 'No Immediate Action';
+        }
+      }
+
+      // Authoritative classification determination
+      const algUpper = (nodeData.algorithm || sampleAsset?.algorithm || name).toUpperCase();
+      const primLower = (nodeData.primitive || sampleAsset?.primitive || '').toLowerCase();
+
+      const isSym = primLower === 'block-cipher' || primLower === 'stream-cipher' || primLower === 'ae' || primLower === 'symmetric' || /AES|CHACHA|DES|3DES|RC4/i.test(algUpper);
+      const isSig = primLower === 'signature' || /ECDSA|ED25519|ED448|DSA|WITHRSA|RSA-SHA|SIGN/i.test(algUpper);
+      const isKdf = primLower === 'kdf' || /PBKDF|SCRYPT|ARGON|HKDF/i.test(algUpper);
+      const isHash = !isSig && !isKdf && (primLower === 'hash' || primLower === 'digest' || primLower === 'mac' || /SHA|MD5|HMAC|BLAKE/i.test(algUpper));
+      const isAsym = !isSym && !isSig && !isHash && !isKdf && (primLower === 'pke' || primLower === 'kem' || primLower === 'key-agree' || primLower === 'key-exchange' || /RSA|ECDH|DH/i.test(algUpper));
+
+      let category: 'public_key' | 'symmetric' | 'hash' | 'kdf' = 'public_key';
+      let usage = 'key_establishment';
+
+      if (isKdf) {
+        category = 'kdf';
+        usage = 'key_derivation';
+      } else if (isSym) {
+        category = 'symmetric';
+        usage = 'symmetric_encryption';
+      } else if (isSig) {
+        category = 'public_key';
+        usage = 'digital_signature';
+      } else if (isHash) {
+        category = 'hash';
+        usage = 'cryptographic_hash';
+      } else if (isAsym) {
+        category = 'public_key';
+        usage = 'key_establishment';
+      }
+
+      const authoritativeRec = RecommendationAdvisor.getAuthoritativeRecommendation(
+        name,
+        nodeData.algorithm || sampleAsset?.algorithm || name,
+        nodeData.assetType,
+        nodeData.primitive,
+        sampleAsset?.mode,
+        keySize
+      );
+
+      scoredAssets.push({
+        assetId: sampleAsset?.assetId || name,
+        assetName: name,
+        algorithm: nodeData.algorithm || sampleAsset?.algorithm || name,
+        version: sampleAsset?.version || nodeData.version || undefined,
+        keySize: keySize,
+        mode: authoritativeRec.mode || sampleAsset?.mode,
+        padding: authoritativeRec.padding,
+        assetType: nodeData.assetType,
+        primitive: nodeData.primitive,
+        category,
+        usage,
+        location: nodeData.locations[0] || sampleAsset?.location || '',
+        locations: nodeData.locations,
+        occurrencesCount: nodeData.occurrencesCount,
+        quantumRisk: qrInfo.risk,
+        quantumRiskScore: qrInfo.score,
+        quantumRiskReason: qrInfo.reason,
+        isNotApplicable: qrInfo.notApplicable,
+        isContextDependent: qrInfo.isContextDependent,
+        dependencyImpactScore: depScore,
+        priorityScore,
+        priorityClassification,
+        isPartial,
+        action,
+        authoritativeRecommendation: authoritativeRec
+      });
+    }
+
+    // Sort scored assets by priority descending
+    scoredAssets.sort((a, b) => (b.priorityScore ?? -1) - (a.priorityScore ?? -1));
+
+    // Dynamic aggregates directly from scoredAssets
+    const total = scoredAssets.length;
+    const publicKey = scoredAssets.filter(a => a.category === 'public_key').length;
+    const symmetric = scoredAssets.filter(a => a.category === 'symmetric').length;
+    const hash = scoredAssets.filter(a => a.category === 'hash').length;
+    const kdf = scoredAssets.filter(a => a.category === 'kdf').length;
+    const hashOrKdf = hash + kdf;
+    const highRisk = scoredAssets.filter(a => a.quantumRisk === 'High' || a.quantumRiskScore === 100).length;
+    const mediumRisk = scoredAssets.filter(a => a.quantumRisk === 'Medium' || a.quantumRiskScore === 60).length;
+    const lowRisk = scoredAssets.filter(a => a.quantumRisk === 'Low' || a.quantumRiskScore === 20).length;
+    const contextDependentRisk = scoredAssets.filter(a => a.quantumRisk === 'Context-Dependent' || a.isContextDependent).length;
+    const legacyRisk = scoredAssets.filter(a => a.isNotApplicable || a.quantumRisk === 'Not Applicable').length;
+    const numericScoredAssets = scoredAssets.filter(a => a.priorityScore !== null).length;
+    const nonNumericAssets = scoredAssets.filter(a => a.priorityScore === null).length;
+    const quantumVulnerable = highRisk;
+    const urgentPriority = scoredAssets.filter(a => a.priorityClassification === 'Urgent').length;
+    const highPriority = scoredAssets.filter(a => a.priorityClassification === 'Urgent' || a.priorityClassification === 'High').length;
+    const legacyPriority = scoredAssets.filter(a => a.priorityClassification === 'Legacy').length;
+    const evidenceRequiredPriority = scoredAssets.filter(a => a.priorityClassification === 'Evidence Required').length;
+
+    // Application Priority (Mosca + APS)
+    const sensScore = getSensitivityValue(analysis.dataSensitivity);
+    const critScore = getCriticalityValue(analysis.businessCriticality);
+    const X = typeof analysis.dataProtectionDuration === 'number' ? analysis.dataProtectionDuration : 5;
+    const Y = typeof analysis.migrationDuration === 'number' ? analysis.migrationDuration : 2;
+    let threatHorizonYear = analysis.threatHorizonYear || 2036;
+    let Z = 10;
+    if (typeof analysis.quantumRiskHorizon === 'number') {
+      if (analysis.quantumRiskHorizon > 2000) {
+        threatHorizonYear = analysis.quantumRiskHorizon;
+        Z = Math.max(1, threatHorizonYear - 2026);
+      } else {
+        Z = analysis.quantumRiskHorizon;
+        threatHorizonYear = analysis.threatHorizonYear || (2026 + Z);
+      }
+    } else if (analysis.threatHorizonYear) {
+      threatHorizonYear = analysis.threatHorizonYear;
+      Z = Math.max(1, threatHorizonYear - 2026);
+    }
+    const timingMargin = Z - (X + Y);
+    const moscaUrgency = getMoscaScore(X, Y, Z);
+    const rawAps = (moscaUrgency + sensScore + critScore) / 3;
+    let priorityClassification = 'Minimal';
+    if (rawAps >= 75) priorityClassification = 'High';
+    else if (rawAps >= 50) priorityClassification = 'Medium';
+    else if (rawAps >= 25) priorityClassification = 'Low';
+
+    const apsScore = Number(rawAps.toFixed(2));
+    const overallPriority = rawAps >= 75 ? 'P1' : rawAps >= 50 ? 'P2' : rawAps >= 25 ? 'P3' : 'P4';
+
+    res.json({
+      analysisId: analysis.analysisId,
+      applicationName: analysis.applicationName,
+      targetType: analysis.targetType || 'source_code',
+      status: analysis.status,
+      createdAt: analysis.createdAt,
+      runtimeEnabled: Boolean(analysis.runtimeEnabled),
+      detectedCryptoAssetCount: analysis.detectedCryptoAssetCount ?? metrics.totalOccurrences,
+      aggregates: {
+        total,
+        totalOccurrences: metrics.totalOccurrences,
+        uniqueLogicalAssets: total,
+        numericScoredAssets,
+        nonNumericAssets,
+        quantumVulnerable,
+        highRisk,
+        mediumRisk,
+        lowRisk,
+        contextDependentRisk,
+        legacyRisk,
+        publicKey,
+        symmetric,
+        hash,
+        kdf,
+        hashOrKdf,
+        urgentPriority,
+        highPriority,
+        legacyPriority,
+        evidenceRequiredPriority
+      },
+      applicationPriority: {
+        dataProtectionLifetime: X,
+        migrationDuration: Y,
+        quantumThreatHorizon: threatHorizonYear,
+        quantumRiskHorizon: Z,
+        timingMargin,
+        moscaUrgency,
+        dataSensitivity: sensScore,
+        businessCriticality: critScore,
+        aps: apsScore,
+        overallPriority,
+        priorityClassification
+      },
+      inventory: scoredAssets,
+      cbomSummary: analysis.cbomSummary || cbom?.cbomSummary || null,
+      risk: {
+        high: highRisk,
+        medium: mediumRisk,
+        low: lowRisk,
+        contextDependent: contextDependentRisk,
+        legacy: legacyRisk
+      },
+      priority: {
+        urgent: urgentPriority,
+        high: highPriority,
+        legacy: legacyPriority,
+        evidenceRequired: evidenceRequiredPriority,
+        numericScoredAssets,
+        nonNumericAssets,
+        aps: apsScore,
+        classification: priorityClassification
+      },
+      recommendations: scoredAssets.map(a => a.authoritativeRecommendation),
+      dependencies: {
+        totalLogicalNodes: metrics.totalLogicalNodes,
+        totalOccurrences: metrics.totalOccurrences,
+        totalEdges: metrics.logicalEdgesMap.size,
+        hasDependencyEvidence: metrics.logicalEdgesMap.size > 0
+      },
+      dependencyMetrics: {
+        totalLogicalNodes: metrics.totalLogicalNodes,
+        totalOccurrences: metrics.totalOccurrences,
+        totalEdges: metrics.logicalEdgesMap.size,
+        hasDependencyEvidence: metrics.logicalEdgesMap.size > 0
+      }
+    });
+  } catch (error: any) {
+    console.error(`[Analysis Summary Error]:`, error);
+    res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
 // Get scored assets for Priority Analysis (Grouped into 9 unique logical assets, CPS formula with 2 factors)
 router.get('/:id/scored-assets', async (req: Request, res: Response): Promise<void> => {
   const cbom = await Cbom.findOne({ analysisId: req.params.id });
@@ -652,13 +1120,15 @@ router.get('/:id/scored-assets', async (req: Request, res: Response): Promise<vo
       score: sampleAsset.cryptavistaScore,
       reason: sampleAsset.cryptavistaReason
     } : undefined;
+    const keyEvidence = sampleAsset?.keySize || (sampleAsset?.version && !isNaN(Number(sampleAsset.version)) ? Number(sampleAsset.version) : undefined);
     const qrInfo = getQuantumRiskInfo(
       nodeData.assetType, 
       nodeData.primitive, 
       nodeData.algorithm || sampleAsset?.algorithm || name, 
       name,
       nodeData.dependsOnList,
-      existingRisk
+      existingRisk,
+      keyEvidence
     );
     const depScore = nodeData.dependencyImpactScore;
 
@@ -701,12 +1171,16 @@ router.get('/:id/scored-assets', async (req: Request, res: Response): Promise<vo
       assetId: sampleAsset?.assetId || name,
       assetName: name,
       algorithm: nodeData.algorithm,
+      version: sampleAsset?.version || nodeData.version || undefined,
+      keySize: sampleAsset?.keySize || nodeData.keySize || undefined,
       assetType: nodeData.assetType,
       primitive: nodeData.primitive,
       location: nodeData.locations[0] || sampleAsset?.location || '',
       locations: nodeData.locations,
       occurrencesCount: nodeData.occurrencesCount,
       occurrences: nodeData.occurrences,
+      isNumericScored: priorityScore !== null,
+      isNonNumeric: priorityScore === null,
       scores: {
         quantumRisk: qrInfo.score,
         quantumRiskClassification: qrInfo.risk,
@@ -727,15 +1201,21 @@ router.get('/:id/scored-assets', async (req: Request, res: Response): Promise<vo
         isPartial,
         priorityClassification,
         action,
+        cpsExplanation: undefined,
         isUnknown: qrInfo.isUnknown,
-        isNotApplicable: qrInfo.notApplicable
+        isNotApplicable: qrInfo.notApplicable,
+        isContextDependent: qrInfo.isContextDependent,
+        isNumericScored: priorityScore !== null,
+        isNonNumeric: priorityScore === null
       }
     });
   }
 
   // Sort by highest priorityScore descending, pushing nulls to the bottom
   result.sort((a, b) => {
-    if (a.scores.priorityScore === null && b.scores.priorityScore === null) return 0;
+    if (a.scores.priorityScore === null && b.scores.priorityScore === null) {
+      return a.assetName.localeCompare(b.assetName);
+    }
     if (a.scores.priorityScore === null) return 1;
     if (b.scores.priorityScore === null) return -1;
     return b.scores.priorityScore - a.scores.priorityScore;
@@ -778,6 +1258,7 @@ router.get('/:id/recommendations', async (req: Request, res: Response): Promise<
 
     for (const [name, nodeData] of metrics.nodeMetrics.entries()) {
       const sampleAsset = assets.find(a => (a.assetName || a.algorithm) === name);
+      const keySize = sampleAsset?.keySize || (sampleAsset?.version && !isNaN(Number(sampleAsset.version)) ? Number(sampleAsset.version) : undefined);
       const existingRisk = sampleAsset?.cryptavistaQuantumRisk ? {
         risk: sampleAsset.cryptavistaQuantumRisk,
         score: sampleAsset.cryptavistaScore,
@@ -789,7 +1270,8 @@ router.get('/:id/recommendations', async (req: Request, res: Response): Promise<
         nodeData.algorithm || sampleAsset?.algorithm || name, 
         name,
         nodeData.dependsOnList,
-        existingRisk
+        existingRisk,
+        keySize
       );
       const depScore = nodeData.dependencyImpactScore;
 
@@ -831,7 +1313,7 @@ router.get('/:id/recommendations', async (req: Request, res: Response): Promise<
         nodeData.assetType,
         nodeData.primitive,
         sampleAsset?.mode,
-        sampleAsset?.keySize
+        keySize
       );
 
       const savedRec = savedRecsMap.get(name);
@@ -840,6 +1322,8 @@ router.get('/:id/recommendations', async (req: Request, res: Response): Promise<
         assetId: sampleAsset?.assetId || name,
         assetName: name,
         algorithm: authoritativeRec.algorithm || nodeData.algorithm || sampleAsset?.algorithm,
+        version: sampleAsset?.version || nodeData.version || undefined,
+        keySize: keySize,
         mode: authoritativeRec.mode || sampleAsset?.mode,
         padding: authoritativeRec.padding,
         assetType: nodeData.assetType,
@@ -849,6 +1333,8 @@ router.get('/:id/recommendations', async (req: Request, res: Response): Promise<
         quantumRisk: qrInfo.risk,
         quantumRiskScore: qrInfo.score,
         quantumRiskReason: qrInfo.reason,
+        isNotApplicable: qrInfo.notApplicable,
+        isContextDependent: qrInfo.isContextDependent,
         dependencyImpactScore: depScore,
         dependencyImpactText: depScore !== null ? `Score: ${depScore}` : 'Unavailable',
         priorityScore,
@@ -867,7 +1353,9 @@ router.get('/:id/recommendations', async (req: Request, res: Response): Promise<
 
     // Sort by highest priorityScore descending
     result.sort((a, b) => {
-      if (a.priorityScore === null && b.priorityScore === null) return 0;
+      if (a.priorityScore === null && b.priorityScore === null) {
+        return a.assetName.localeCompare(b.assetName);
+      }
       if (a.priorityScore === null) return 1;
       if (b.priorityScore === null) return -1;
       return b.priorityScore - a.priorityScore;
@@ -908,6 +1396,7 @@ router.post('/:id/recommendations/:assetName/generate', async (req: Request, res
     }
 
     const sampleAsset = assets.find(a => (a.assetName || a.algorithm) === assetName);
+    const keySize = sampleAsset?.keySize || (sampleAsset?.version && !isNaN(Number(sampleAsset.version)) ? Number(sampleAsset.version) : undefined);
     const existingRisk = sampleAsset?.cryptavistaQuantumRisk ? {
       risk: sampleAsset.cryptavistaQuantumRisk,
       score: sampleAsset.cryptavistaScore,
@@ -919,7 +1408,8 @@ router.post('/:id/recommendations/:assetName/generate', async (req: Request, res
       nodeData.algorithm || sampleAsset?.algorithm || assetName, 
       assetName,
       nodeData.dependsOnList,
-      existingRisk
+      existingRisk,
+      keySize
     );
     const depScore = nodeData.dependencyImpactScore;
 
@@ -946,7 +1436,7 @@ router.post('/:id/recommendations/:assetName/generate', async (req: Request, res
       nodeData.assetType,
       nodeData.primitive,
       sampleAsset?.mode,
-      sampleAsset?.keySize
+      keySize
     );
 
     // Cache check: if already generated and force is not set, return cached
@@ -976,7 +1466,7 @@ router.post('/:id/recommendations/:assetName/generate', async (req: Request, res
       nodeData.assetType,
       nodeData.primitive,
       sampleAsset?.mode,
-      sampleAsset?.keySize
+      keySize
     );
 
     // Application context
@@ -1045,7 +1535,10 @@ router.post('/:id/recommendations/:assetName/generate', async (req: Request, res
     });
   } catch (err: any) {
     console.error('Failed to generate AI recommendation:', err);
-    res.status(500).json({ error: 'AI explanations are currently unavailable. The authoritative migration recommendation is still available.' });
+    const userError = err.message && (err.message.includes('GEMINI_API_KEY') || err.message.includes('API key') || err.message.includes('Google Gemini'))
+      ? err.message
+      : 'AI explanations are currently unavailable. The authoritative migration recommendation is still available.';
+    res.status(500).json({ error: userError });
   }
 });
 
@@ -1111,7 +1604,7 @@ router.get('/:id/dependency-graph', async (req: Request, res: Response): Promise
 });
 
 
-async function processAnalysis(analysisId: string, repositoryUrl?: string, zipFilePath?: string) {
+async function processAnalysis(analysisId: string, repositoryUrl?: string, zipFilePath?: string, targetType?: string, branch?: string, commit?: string) {
   try {
     const updateDiscoverStage = async (status: string, extra: any = {}) => {
       const updateData: any = { 
@@ -1133,43 +1626,126 @@ async function processAnalysis(analysisId: string, repositoryUrl?: string, zipFi
       });
     };
 
-    await Analysis.updateOne({ analysisId }, { $set: { status: 'RUNNING', currentStage: 'DISCOVER' } });
+    const initialUpdate: any = { status: 'RUNNING', currentStage: 'DISCOVER' };
+    if (branch) initialUpdate.gitBranch = branch;
+    if (commit) initialUpdate.gitCommit = commit;
+    await Analysis.updateOne({ analysisId }, { $set: initialUpdate });
     await updateDiscoverStage('RUNNING');
-    
-    // Instead of local scanning, we poll the official CBOMKit backend
-    let cbomFound = false;
-    let foundCbom = null;
-    let retries = 0;
-    
-    // We poll every 5 seconds for up to 15 minutes (180 retries)
-    while (!cbomFound && retries < 180) {
-      await new Promise(r => setTimeout(r, 5000));
-      retries++;
-      
-      try {
-        const response = await axios.get('http://localhost:8081/api/v1/cbom/last/10');
-        const cboms = response.data;
-        
-        // Find a CBOM that was created AFTER this analysis started
-        const analysisDoc = await Analysis.findOne({ analysisId });
-        const analysisStartTime = analysisDoc?.createdAt?.getTime() || Date.now() - 30000; // fallback to 30s ago
-        
-        const recentCbom = cboms.find((c: any) => c.createdAt > analysisStartTime);
-        
-        if (recentCbom) {
-          cbomFound = true;
-          foundCbom = recentCbom;
-        }
-      } catch (err) {
-        console.error('Error polling CBOMKit API', err);
+
+    let assetCount = 0;
+
+    if (targetType === 'folder') {
+      console.log(`[Discovery: ${analysisId}] Processing Project Folder target from archive: ${zipFilePath}`);
+      if (!zipFilePath) {
+        throw new Error('Project folder archive missing from upload request.');
       }
+
+      // 1. Safely extract archive to scans/<analysisId>
+      const targetDir = await TargetService.prepareZipTarget(analysisId, zipFilePath);
+      console.log(`[Discovery: ${analysisId}] Safely extracted project folder to ${targetDir}`);
+
+      // 2. Discover cryptographic assets using LocalScanner
+      let lastProgressSync = 0;
+      const cbomJson = await LocalScanner.scanDirectory(targetDir, async (partialCbom, info) => {
+        const now = Date.now();
+        if (now - lastProgressSync > 250 || info.scannedFiles === info.totalFiles) {
+          lastProgressSync = now;
+          try {
+            await Analysis.updateOne({ analysisId }, {
+              $set: {
+                scannedFiles: info.scannedFiles,
+                scannedLines: info.lines,
+                detectedCryptoAssetCount: info.assetCount,
+                'stages.discover.assetCount': info.assetCount
+              }
+            });
+
+            await CbomkitAdapter.processOfficialCbom(analysisId, partialCbom, true);
+          } catch (progressErr) {
+            console.warn(`[Discovery: ${analysisId}] Progress update note:`, (progressErr as Error).message);
+          }
+        }
+      });
+      console.log(`[Discovery: ${analysisId}] LocalScanner generated CycloneDX CBOM with ${cbomJson.components?.length || 0} components`);
+
+      await Analysis.updateOne({ analysisId }, {
+        $set: {
+          scannedFiles: cbomJson.scannedFiles ?? 0,
+          scannedLines: cbomJson.scannedLines ?? 0
+        }
+      });
+
+      // 3. Process official CBOM (compliance check + quantum risk classification + MongoDB storage)
+      assetCount = await CbomkitAdapter.processOfficialCbom(analysisId, cbomJson, false);
+      console.log(`[Discovery: ${analysisId}] Processed and stored ${assetCount} cryptographic asset occurrences`);
+    } else {
+      // Existing Source Repository flow: Trigger and Poll CBOMKit (teammate's working implementation)
+      const scanStartTime = Date.now();
+      if (repositoryUrl) {
+        try {
+          console.log(`[Discovery: ${analysisId}] Requesting CBOMKit scan for Git repository: ${repositoryUrl}`);
+          await axios.post(
+            'http://localhost:8081/api/v1/scan',
+            { scanUrl: repositoryUrl },
+            { headers: { 'Content-Type': 'application/json' }, timeout: 10000 }
+          );
+        } catch (scanErr: any) {
+          console.warn(`[Discovery: ${analysisId}] CBOMKit scan dispatch note:`, scanErr.message);
+        }
+      }
+
+      let cbomFound = false;
+      let foundCbom = null;
+      let retries = 0;
+      const cleanRepo = repositoryUrl ? repositoryUrl.split('/').pop()?.replace(/\.git$/i, '').toLowerCase() : '';
+      
+      // We poll every 5 seconds for up to 15 minutes (180 retries)
+      while (!cbomFound && retries < 180) {
+        await new Promise(r => setTimeout(r, 5000));
+        retries++;
+        
+        try {
+          const response = await axios.get('http://localhost:8081/api/v1/cbom/last/10');
+          const cboms = response.data;
+          
+          // Find a CBOM that was created AFTER this scan started, matching the target repo if available
+          const recentCbom = cboms.find((c: any) => {
+            const cTime = typeof c.createdAt === 'number' ? c.createdAt : new Date(c.createdAt).getTime();
+            const isAfterScan = !isNaN(cTime) ? cTime >= (scanStartTime - 30000) : true;
+            if (!isAfterScan) return false;
+            if (cleanRepo && c.gitUrl) {
+              return c.gitUrl.toLowerCase().includes(cleanRepo);
+            }
+            return true;
+          });
+          
+          if (recentCbom) {
+            cbomFound = true;
+            foundCbom = recentCbom;
+          }
+        } catch (err) {
+          console.error('Error polling CBOMKit API', err);
+        }
+      }
+      
+      if (!cbomFound || !foundCbom) {
+        throw new Error('Timeout waiting for CBOMKit to generate a CBOM. Please try again.');
+      }
+      
+      assetCount = await CbomkitAdapter.processOfficialCbom(analysisId, foundCbom.bom);
+
+      const linesVal = foundCbom.numberOfLines || foundCbom.scanning?.numberOfLines || 0;
+      const filesVal = foundCbom.numberOfFiles || foundCbom.scanning?.numberOfFiles || (foundCbom.bom?.components?.length ? Math.max(1, Math.round(foundCbom.bom.components.length / 3)) : 0);
+      await Analysis.updateOne({ analysisId }, {
+        $set: {
+          repositoryUrl: foundCbom.gitUrl || foundCbom.scanning?.gitUrl || repositoryUrl,
+          scannedFiles: filesVal,
+          scannedLines: linesVal,
+          gitBranch: branch || foundCbom.branch || foundCbom.scanning?.branch || 'main',
+          gitCommit: commit || foundCbom.commit || foundCbom.scanning?.commit || 'HEAD'
+        }
+      });
     }
-    
-    if (!cbomFound || !foundCbom) {
-      throw new Error('Timeout waiting for CBOMKit to generate a CBOM. Please try again.');
-    }
-    
-    const assetCount = await CbomkitAdapter.processOfficialCbom(analysisId, foundCbom.bom);
     
     await updateDiscoverStage('COMPLETED', { 
       'stages.discover.assetCount': assetCount,

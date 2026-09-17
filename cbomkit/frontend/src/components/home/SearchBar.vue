@@ -6,6 +6,7 @@
         class="search-bar"
         placeholder="Enter Git URL or Package URL to scan"
         v-model="model.codeOrigin.scanUrl"
+        @paste="onPaste"
         @keyup.enter="connectAndScan(advancedOptions()[0], advancedOptions()[1], advancedOptions()[2])"
       />
       <cv-button
@@ -81,7 +82,29 @@ export default {
       passwordOrPAT: null,
     };
   },
+  mounted() {
+    this.updateFolderIcon();
+  },
+  updated() {
+    this.updateFolderIcon();
+  },
   methods: {
+    updateFolderIcon() {
+      const urlParams = new URLSearchParams(window.location.search);
+      const isFolder = urlParams.get('targetType') === 'folder' || window.__targetType === 'folder';
+      if (isFolder && this.$el) {
+        const magWrapper = this.$el.querySelector('.bx--search-magnifier, .cds--search-magnifier');
+        if (magWrapper && magWrapper.querySelector('svg')?.getAttribute('data-icon-type') !== 'plus') {
+          magWrapper.innerHTML = '<svg focusable="false" preserveAspectRatio="xMidYMid meet" xmlns="http://www.w3.org/2000/svg" fill="currentColor" aria-hidden="true" class="bx--search-magnifier-icon folder-plus-icon" data-icon-type="plus" width="16" height="16" viewBox="0 0 32 32"><path d="M17 15 17 8 15 8 15 15 8 15 8 17 15 17 15 24 17 24 17 17 24 17 24 15z"></path></svg>';
+        }
+      }
+    },
+    onPaste(e) {
+      const pasteText = e.clipboardData?.getData('text');
+      if (pasteText) {
+        this.model.codeOrigin.scanUrl = pasteText.trim();
+      }
+    },
     advancedOptions: function () {
       if (this.filterOpen) {
         return [this.gitBranch, this.gitSubfolder, { username: this.username, passwordOrPAT: this.passwordOrPAT }];
@@ -119,5 +142,11 @@ export default {
 .filters-leave-to {
   opacity: 0;
   max-height: 0;
+}
+::v-deep .folder-plus-icon {
+  width: 16px;
+  height: 16px;
+  fill: currentColor;
+  pointer-events: none;
 }
 </style>

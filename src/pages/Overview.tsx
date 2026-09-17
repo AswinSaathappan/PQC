@@ -38,7 +38,7 @@ export default function Overview({ onNavigate, analyses = [], selectedAnalysisId
   const kpis = [
     { label: "Total Applications", value: totalApplications.toString() },
     { label: "Applications Analyzed", value: applicationsAnalyzed.toString() },
-    { label: "Total Cryptographic Assets", value: displayTotalAssets.toString() },
+    { label: "Total Cryptographic Asset Occurrences", value: displayTotalAssets.toString() },
   ];
 
   const pipelineStages = [

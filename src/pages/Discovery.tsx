@@ -117,7 +117,7 @@ export default function Discovery({ selectedAnalysisId: propSelectedId, analyses
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.href = url;
-    link.setAttribute("download", `cbom-export-${selectedAnalysisId || 'all'}.csv`);
+    link.setAttribute("download", `cbom-export-${activeSelectedId || 'all'}.csv`);
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -132,7 +132,7 @@ export default function Discovery({ selectedAnalysisId: propSelectedId, analyses
           <div>
             <div className="text-[15px] font-bold text-[#1a1d23]">Cryptographic Asset Discovery</div>
             <div className="text-[12px] text-[#6b7589] mt-0.5">
-              Discovered cryptographic assets — sourced directly from scanner results
+              Discovered cryptographic asset occurrences — sourced directly from scanner results
             </div>
           </div>
           <div className="flex items-center gap-3">
@@ -160,7 +160,7 @@ export default function Discovery({ selectedAnalysisId: propSelectedId, analyses
           <div className="px-5 py-3 border-b border-[#dde1e9] flex items-center gap-3 bg-white">
             <div className="flex-1">
               <span className="text-[13px] font-semibold text-[#1a1d23]">
-                Cryptographic Assets ({loading ? "…" : filtered.length})
+                Total Cryptographic Asset Occurrences ({loading ? "…" : filtered.length})
               </span>
             </div>
             <div className="flex items-center gap-1.5 bg-[#f5f6f8] border border-[#dde1e9] rounded-md px-3 py-1.5 w-60">

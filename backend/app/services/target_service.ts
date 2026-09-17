@@ -7,6 +7,10 @@ const SCANS_DIR = path.resolve(__dirname, '../../../scans');
 
 export class TargetService {
   
+  static getTargetDir(analysisId: string): string {
+    return path.join(SCANS_DIR, analysisId);
+  }
+
   static async prepareGitTarget(analysisId: string, repoUrl: string): Promise<string> {
     const targetDir = path.join(SCANS_DIR, analysisId);
     if (!fs.existsSync(SCANS_DIR)) {
@@ -39,22 +43,34 @@ export class TargetService {
     }
 
     try {
+      if (!zipFilePath || !fs.existsSync(zipFilePath)) {
+        throw new Error(`Upload archive not found at path: ${zipFilePath || 'undefined'}`);
+      }
+
       const zip = new AdmZip(zipFilePath);
-      
-      // Basic Zip Slip prevention check
       const zipEntries = zip.getEntries();
+      if (zipEntries.length === 0) {
+        throw new Error('Uploaded archive is empty.');
+      }
+      
+      // Zip Slip prevention check
       for (const entry of zipEntries) {
         const entryName = entry.entryName;
-        // Simple path traversal check
-        if (entryName.includes('..')) {
+        if (entryName.includes('..') || path.isAbsolute(entryName)) {
           throw new Error('Zip Slip vulnerability detected in uploaded archive.');
         }
       }
 
       zip.extractAllTo(targetDir, true);
       
-      // Cleanup the original zip file
-      fs.unlinkSync(zipFilePath);
+      // Cleanup the original zip file safely
+      try {
+        if (fs.existsSync(zipFilePath)) {
+          fs.unlinkSync(zipFilePath);
+        }
+      } catch (cleanupErr) {
+        console.warn(`[TargetService] Non-fatal cleanup warning for ${zipFilePath}:`, cleanupErr);
+      }
       return targetDir;
     } catch (error) {
       console.error(`Failed to extract zip file ${zipFilePath}:`, error);

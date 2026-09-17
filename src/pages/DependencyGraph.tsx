@@ -21,6 +21,7 @@ export default function DependencyGraph({ selectedAnalysisId, analyses = [], onS
   const [elements, setElements] = useState<any[]>([]);
   const [uniqueAssetsCount, setUniqueAssetsCount] = useState<number>(0);
   const [cbomOccurrencesCount, setCbomOccurrencesCount] = useState<number>(0);
+  const [totalEdges, setTotalEdges] = useState<number>(0);
   const [available, setAvailable] = useState<boolean>(true);
   const [loading, setLoading] = useState<boolean>(true);
 
@@ -36,6 +37,7 @@ export default function DependencyGraph({ selectedAnalysisId, analyses = [], onS
           setElements([]);
           setUniqueAssetsCount(0);
           setCbomOccurrencesCount(0);
+          setTotalEdges(0);
           setAvailable(false);
           setLoading(false);
         }
@@ -53,12 +55,17 @@ export default function DependencyGraph({ selectedAnalysisId, analyses = [], onS
             if (data.available && Array.isArray(data.elements) && data.elements.length > 0) {
               setElements(data.elements);
               setUniqueAssetsCount(data.uniqueAssets || data.elements.filter((e: any) => !e.data?.source).length);
-              setCbomOccurrencesCount(data.cbomOccurrences || 16);
+              setCbomOccurrencesCount(data.cbomOccurrences || 0);
+              const edgesCount = typeof data.summary?.totalEdges === 'number' 
+                ? data.summary.totalEdges 
+                : data.elements.filter((e: any) => Boolean(e.data?.source)).length;
+              setTotalEdges(edgesCount);
               setAvailable(true);
             } else {
               setElements([]);
               setUniqueAssetsCount(0);
               setCbomOccurrencesCount(0);
+              setTotalEdges(0);
               setAvailable(false);
             }
           }
@@ -280,7 +287,7 @@ export default function DependencyGraph({ selectedAnalysisId, analyses = [], onS
               Relationships between detected cryptographic assets and the software components that use them.
             </p>
             <div className="mt-2 text-xs font-semibold text-[#1e3a5f]">
-              {uniqueAssetsCount} unique assets • {cbomOccurrencesCount} CBOM occurrences
+              Total Cryptographic Asset Occurrences: {cbomOccurrencesCount} • {uniqueAssetsCount} asset nodes • {totalEdges} verified dependency relationships
             </div>
           </div>
 

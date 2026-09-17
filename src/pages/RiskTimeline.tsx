@@ -21,10 +21,10 @@ const priorityConfig: Record<string, { cls: string }> = {
 
 function getMoscaUrgency(margin: number) {
   if (margin <= 0) return { score: 100, text: "Critical" };
-  if (margin <= 2) return { score: 85, text: "Very High" };
-  if (margin <= 5) return { score: 70, text: "High" };
-  if (margin <= 10) return { score: 50, text: "Medium" };
-  return { score: 25, text: "Low" };
+  if (margin <= 2) return { score: 75, text: "Very High" };
+  if (margin <= 5) return { score: 50, text: "High" };
+  if (margin <= 10) return { score: 25, text: "Medium" };
+  return { score: 0, text: "Low" };
 }
 
 function getFinalPriority(aps: number) {
@@ -177,6 +177,7 @@ export default function RiskTimeline({ selectedAnalysisId, onSelectAnalysis, ana
   const [horizonYear, setHorizonYear] = useState(2036);
   const [applications, setApplications] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [chartFocus, setChartFocus] = useState<'all' | 'top5' | 'selected'>('all');
 
   useEffect(() => {
     async function fetchData() {
@@ -224,16 +225,114 @@ export default function RiskTimeline({ selectedAnalysisId, onSelectAnalysis, ana
   const dsText = actDS === 100 ? "Highly Confidential" : actDS === 75 ? "Confidential" : actDS === 50 ? "Internal" : "Public";
   const bcText = actBC === 100 ? "Critical" : actBC === 75 ? "High" : actBC === 50 ? "Medium" : "Low";
 
-  // Compute chart domain
-  const maxRequired = Math.max(10, ...applications.map(a => (a.dataProtectionDuration || 5) + (a.migrationDuration || 2)));
-  const maxVal = Math.max(maxRequired, actZ) + 3;
+  // Top applications sorted by urgency/margin for comparison
+  const sortedApps = [...applications].sort((a, b) => {
+    const aX = typeof a.dataProtectionDuration === 'number' ? a.dataProtectionDuration : 5;
+    const aY = typeof a.migrationDuration === 'number' ? a.migrationDuration : 2;
+    const bX = typeof b.dataProtectionDuration === 'number' ? b.dataProtectionDuration : 5;
+    const bY = typeof b.migrationDuration === 'number' ? b.migrationDuration : 2;
+    const aMargin = actZ - (aX + aY);
+    const bMargin = actZ - (bX + bY);
+    return aMargin - bMargin; // Most urgent (smallest margin) first
+  });
 
-  const chartData = applications.map(app => ({
-    name: app.applicationName,
-    X: typeof app.dataProtectionDuration === 'number' ? app.dataProtectionDuration : 5,
-    Y: typeof app.migrationDuration === 'number' ? app.migrationDuration : 2,
-    total: (typeof app.dataProtectionDuration === 'number' ? app.dataProtectionDuration : 5) + (typeof app.migrationDuration === 'number' ? app.migrationDuration : 2),
-  }));
+  const top5Apps = sortedApps.slice(0, 5);
+  if (activeApp && !top5Apps.some(a => a.analysisId === activeApp.analysisId)) {
+    top5Apps[top5Apps.length - 1] = activeApp;
+  }
+
+  // Name collision avoidance for Recharts category YAxis
+  const nameCounts: Record<string, number> = {};
+  applications.forEach(a => {
+    const n = a.applicationName || a.analysisId || 'App';
+    nameCounts[n] = (nameCounts[n] || 0) + 1;
+  });
+
+  const allChartData = applications.map((app, idx) => {
+    const xVal = typeof app.dataProtectionDuration === 'number' ? app.dataProtectionDuration : 5;
+    const yVal = typeof app.migrationDuration === 'number' ? app.migrationDuration : 2;
+    const totalVal = xVal + yVal;
+    const zVal = actZ;
+    const marginVal = zVal - totalVal;
+    const rawName = app.applicationName || app.analysisId || `App ${idx + 1}`;
+    const displayName = (nameCounts[rawName] > 1 && app.analysisId)
+      ? `${rawName} (${app.analysisId.slice(0, 8)})`
+      : rawName;
+
+    return {
+      name: displayName,
+      applicationName: rawName,
+      analysisId: app.analysisId,
+      X: xVal,
+      Y: yVal,
+      total: totalVal,
+      Z: zVal,
+      timingMargin: marginVal,
+      isSelected: app.analysisId === activeApp?.analysisId,
+    };
+  });
+
+  const selectedChartData = activeApp ? [
+    {
+      name: activeApp.applicationName || activeApp.analysisId || 'Selected App',
+      applicationName: activeApp.applicationName || activeApp.analysisId || 'Selected App',
+      analysisId: activeApp.analysisId,
+      X: actX,
+      Y: actY,
+      total: actX + actY,
+      Z: actZ,
+      timingMargin: actMargin,
+      isSelected: true,
+    }
+  ] : [];
+
+  const top5ChartData = top5Apps.map((app, idx) => {
+    const xVal = typeof app.dataProtectionDuration === 'number' ? app.dataProtectionDuration : 5;
+    const yVal = typeof app.migrationDuration === 'number' ? app.migrationDuration : 2;
+    const totalVal = xVal + yVal;
+    const zVal = actZ;
+    const marginVal = zVal - totalVal;
+    const rawName = app.applicationName || app.analysisId || `App ${idx + 1}`;
+    const displayName = (nameCounts[rawName] > 1 && app.analysisId)
+      ? `${rawName} (${app.analysisId.slice(0, 8)})`
+      : rawName;
+
+    return {
+      name: displayName,
+      applicationName: rawName,
+      analysisId: app.analysisId,
+      X: xVal,
+      Y: yVal,
+      total: totalVal,
+      Z: zVal,
+      timingMargin: marginVal,
+      isSelected: app.analysisId === activeApp?.analysisId,
+    };
+  });
+
+  const activeChartData = chartFocus === 'all'
+    ? allChartData
+    : chartFocus === 'top5'
+    ? top5ChartData
+    : selectedChartData;
+
+  const maxVal = Math.max(
+    12,
+    actZ + 4,
+    ...activeChartData.map(d => (d.total || (d.X || 0) + (d.Y || 0)) + 4)
+  );
+
+  const chartHeight = chartFocus === 'selected'
+    ? 190
+    : Math.max(240, activeChartData.length * 44 + 60);
+
+  const barSize = chartFocus === 'selected'
+    ? 32
+    : activeChartData.length <= 4
+    ? 28
+    : activeChartData.length <= 8
+    ? 22
+    : 16;
 
   const handleHorizonYearChange = async (year: number) => {
     setHorizonYear(year);
@@ -290,7 +389,7 @@ export default function RiskTimeline({ selectedAnalysisId, onSelectAnalysis, ana
                 >
                   {analyses.map(a => (
                     <option key={a.analysisId} value={a.analysisId}>
-                      {a.applicationName}
+                      {a.applicationName} ({a.analysisId})
                     </option>
                   ))}
                 </select>
@@ -360,7 +459,7 @@ export default function RiskTimeline({ selectedAnalysisId, onSelectAnalysis, ana
         {/* SECTION 14: CRYPTAVISTA APPLICATION PRIORITY MAPPING */}
         <div className="bg-white border border-[#dde1e9] rounded-lg p-5 shadow-sm">
           <div className="text-[14px] font-bold text-[#1e3a5f] mb-1">CRYPTAVISTA Application Priority Mapping</div>
-          <div className="text-[11px] text-[#6b7589] mb-4">Standardized evaluation matrices used for Application Priority Score (APS) computation.</div>
+          <div className="text-[11px] text-[#6b7589] mb-4">Standardized evaluation matrices used for Application Priority Score (APS) computation. Urgency scores are CRYPTAVISTA-defined metrics derived from the Mosca timing relationship.</div>
 
           <div className="grid grid-cols-2 gap-5">
             {/* Table 1: Mosca Urgency Mapping */}
@@ -371,17 +470,17 @@ export default function RiskTimeline({ selectedAnalysisId, onSelectAnalysis, ana
               <table className="w-full text-[11px]">
                 <thead className="bg-[#f9fafb] border-b border-[#dde1e9] text-[#6b7589]">
                   <tr>
-                    <th className="px-3 py-1.5 text-left">Timing Margin Z - (X+Y)</th>
+                    <th className="px-3 py-1.5 text-left">Timing Margin Z − (X + Y)</th>
                     <th className="px-3 py-1.5 text-center">Score</th>
                     <th className="px-3 py-1.5 text-left">Classification</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-[#eef0f3]">
-                  <tr><td className="px-3 py-1.5 font-mono">&lt;= 0</td><td className="px-3 py-1.5 text-center font-bold">100</td><td className="px-3 py-1.5 text-red-700 font-semibold">Critical</td></tr>
-                  <tr className="bg-blue-50/30"><td className="px-3 py-1.5 font-mono">&gt; 0 and &lt;= 2</td><td className="px-3 py-1.5 text-center font-bold text-[#1e3a5f]">85</td><td className="px-3 py-1.5 text-red-600 font-semibold">Very High</td></tr>
-                  <tr><td className="px-3 py-1.5 font-mono">&gt; 2 and &lt;= 5</td><td className="px-3 py-1.5 text-center font-bold">70</td><td className="px-3 py-1.5 text-orange-600 font-semibold">High</td></tr>
-                  <tr><td className="px-3 py-1.5 font-mono">&gt; 5 and &lt;= 10</td><td className="px-3 py-1.5 text-center font-bold">50</td><td className="px-3 py-1.5 text-amber-600 font-semibold">Medium</td></tr>
-                  <tr><td className="px-3 py-1.5 font-mono">&gt; 10</td><td className="px-3 py-1.5 text-center font-bold">25</td><td className="px-3 py-1.5 text-emerald-600 font-semibold">Low</td></tr>
+                  <tr className={actMosca.text === "Critical" ? "bg-blue-50/30" : ""}><td className="px-3 py-1.5 font-mono">≤ 0</td><td className="px-3 py-1.5 text-center font-bold">100</td><td className="px-3 py-1.5 text-red-700 font-semibold">Critical</td></tr>
+                  <tr className={actMosca.text === "Very High" ? "bg-blue-50/30" : ""}><td className="px-3 py-1.5 font-mono">&gt; 0 and ≤ 2</td><td className="px-3 py-1.5 text-center font-bold text-[#1e3a5f]">75</td><td className="px-3 py-1.5 text-red-600 font-semibold">Very High</td></tr>
+                  <tr className={actMosca.text === "High" ? "bg-blue-50/30" : ""}><td className="px-3 py-1.5 font-mono">&gt; 2 and ≤ 5</td><td className="px-3 py-1.5 text-center font-bold">50</td><td className="px-3 py-1.5 text-orange-600 font-semibold">High</td></tr>
+                  <tr className={actMosca.text === "Medium" ? "bg-blue-50/30" : ""}><td className="px-3 py-1.5 font-mono">&gt; 5 and ≤ 10</td><td className="px-3 py-1.5 text-center font-bold">25</td><td className="px-3 py-1.5 text-amber-600 font-semibold">Medium</td></tr>
+                  <tr className={actMosca.text === "Low" ? "bg-blue-50/30" : ""}><td className="px-3 py-1.5 font-mono">&gt; 10</td><td className="px-3 py-1.5 text-center font-bold">0</td><td className="px-3 py-1.5 text-emerald-600 font-semibold">Low</td></tr>
                 </tbody>
               </table>
             </div>
@@ -441,54 +540,191 @@ export default function RiskTimeline({ selectedAnalysisId, onSelectAnalysis, ana
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-[#eef0f3]">
-                  <tr className="bg-blue-50/30"><td className="px-3 py-1.5 font-mono font-bold text-[#1e3a5f]">75 – 100</td><td className="px-3 py-1.5 text-red-700 font-bold">High</td></tr>
-                  <tr><td className="px-3 py-1.5 font-mono">50 – 74.99</td><td className="px-3 py-1.5 text-amber-700 font-bold">Medium</td></tr>
-                  <tr><td className="px-3 py-1.5 font-mono">25 – 49.99</td><td className="px-3 py-1.5 text-emerald-700 font-bold">Low</td></tr>
-                  <tr><td className="px-3 py-1.5 font-mono">0 – 24.99</td><td className="px-3 py-1.5 text-slate-600 font-bold">Minimal</td></tr>
+                  <tr className={actPriority === "High" ? "bg-blue-50/30" : ""}><td className="px-3 py-1.5 font-mono font-bold text-[#1e3a5f]">75 – 100</td><td className="px-3 py-1.5 text-red-700 font-bold">High</td></tr>
+                  <tr className={actPriority === "Medium" ? "bg-blue-50/30" : ""}><td className="px-3 py-1.5 font-mono">50 – 74.99</td><td className="px-3 py-1.5 text-amber-700 font-bold">Medium</td></tr>
+                  <tr className={actPriority === "Low" ? "bg-blue-50/30" : ""}><td className="px-3 py-1.5 font-mono">25 – 49.99</td><td className="px-3 py-1.5 text-emerald-700 font-bold">Low</td></tr>
+                  <tr className={actPriority === "Minimal" ? "bg-blue-50/30" : ""}><td className="px-3 py-1.5 font-mono">0 – 24.99</td><td className="px-3 py-1.5 text-slate-600 font-bold">Minimal</td></tr>
                 </tbody>
               </table>
             </div>
           </div>
         </div>
 
-        {/* Chart */}
+        {/* Chart: Mosca Timeline Comparison */}
         <div className="bg-white border border-[#dde1e9] rounded-lg overflow-hidden p-5 shadow-sm">
-          <div className="text-[13px] font-bold text-[#1a1d23] mb-1">Mosca Timeline Comparison (X + Y vs Z)</div>
-          <div className="text-[11px] text-[#6b7589] mb-4">When X + Y ≥ Z, timing margin is negative or zero requiring urgent migration planning.</div>
-          <div style={{ height: '320px' }}>
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart
-                data={chartData}
-                layout="vertical"
-                barSize={28}
-                margin={{ top: 20, right: 30, left: 80, bottom: 10 }}
+          <div className="flex items-center justify-between mb-4 flex-wrap gap-3">
+            <div>
+              <div className="text-[14px] font-bold text-[#1a1d23]">
+                {chartFocus === 'all'
+                  ? "Mosca Timeline Comparison (All Applications)"
+                  : chartFocus === 'top5'
+                  ? "Mosca Timeline Comparison (Top 5 Critical Apps)"
+                  : "Mosca Timeline Comparison (Selected Application Focus)"}
+              </div>
+              <div className="text-[11px] text-[#6b7589]">
+                Comparing Data Protection Duration (X) + Migration Duration (Y) against Quantum Threat Horizon (Z = {actZ} years) across {chartFocus === 'all' ? 'all applications' : chartFocus === 'top5' ? 'top 5 critical applications' : (activeApp?.applicationName || 'selected application')}.
+              </div>
+            </div>
+            
+            <div className="flex items-center gap-1 bg-[#f5f6f8] p-1 rounded-md border border-[#dde1e9] text-xs">
+              <button
+                onClick={() => setChartFocus('all')}
+                className={`px-3 py-1 rounded font-medium transition-colors ${
+                  chartFocus === 'all'
+                    ? 'bg-[#1e3a5f] text-white shadow-sm'
+                    : 'text-[#6b7589] hover:text-[#1a1d23]'
+                }`}
               >
-                <CartesianGrid strokeDasharray="3 3" stroke="#f0f2f5" horizontal={false} />
-                <XAxis type="number" domain={[0, maxVal]} tick={{ fontSize: 10, fill: "#9aa1b1" }} />
-                <YAxis type="category" dataKey="name" width={120} tick={{ fontSize: 11, fill: "#6b7589" }} />
-                <Tooltip
-                  contentStyle={{ fontSize: 12, borderColor: "#dde1e9", borderRadius: 6 }}
-                  formatter={(value: any, name: any) => [`${value} yr`, name === "total" ? "Combined (X+Y)" : name]}
-                />
-                <ReferenceLine
-                  x={actZ}
-                  stroke="#C2413B"
-                  strokeWidth={2}
-                  strokeDasharray="4 2"
-                  label={{
-                    position: "insideTop",
-                    value: `Risk Horizon (Z = ${actZ} yr, ${horizonYear})`,
-                    fill: "#C2413B",
-                    fontSize: 10,
-                    offset: -20,
-                  }}
-                />
-                <Bar dataKey="X" stackId="a" fill="#718096" name="Data Protection (X)" />
-                <Bar dataKey="Y" stackId="a" fill="#D69E2E" name="Migration Duration (Y)" />
-                <Bar dataKey="total" fill="transparent" />
-              </BarChart>
-            </ResponsiveContainer>
+                All Applications
+              </button>
+              <button
+                onClick={() => setChartFocus('top5')}
+                className={`px-3 py-1 rounded font-medium transition-colors ${
+                  chartFocus === 'top5'
+                    ? 'bg-[#1e3a5f] text-white shadow-sm'
+                    : 'text-[#6b7589] hover:text-[#1a1d23]'
+                }`}
+              >
+                Top 5 Critical Apps
+              </button>
+              <button
+                onClick={() => setChartFocus('selected')}
+                className={`px-3 py-1 rounded font-medium transition-colors ${
+                  chartFocus === 'selected'
+                    ? 'bg-[#1e3a5f] text-white shadow-sm'
+                    : 'text-[#6b7589] hover:text-[#1a1d23]'
+                }`}
+              >
+                Selected Application Focus
+              </button>
+            </div>
           </div>
+
+          {/* Quick Metrics Summary Strip */}
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-3 p-3 bg-[#f8fafc] border border-[#dde1e9] rounded-lg mb-4 text-xs">
+            <div>
+              <span className="text-[#6b7589] block text-[10px] uppercase font-bold">Data Protection (X)</span>
+              <span className="font-bold text-[#1a1d23] text-sm">{actX} years</span>
+              <span className="text-[10px] text-[#6b7589] block">Protection period</span>
+            </div>
+            <div>
+              <span className="text-[#6b7589] block text-[10px] uppercase font-bold">Migration Duration (Y)</span>
+              <span className="font-bold text-[#d97706] text-sm">{actY} years</span>
+              <span className="text-[10px] text-[#6b7589] block">Execution transition</span>
+            </div>
+            <div>
+              <span className="text-[#6b7589] block text-[10px] uppercase font-bold">Total Required (X + Y)</span>
+              <span className="font-bold text-[#1e3a5f] text-sm">{actX + actY} years</span>
+              <span className="text-[10px] text-[#6b7589] block">Target: {2026 + actX + actY}</span>
+            </div>
+            <div>
+              <span className="text-[#6b7589] block text-[10px] uppercase font-bold">Timing Margin Z - (X + Y)</span>
+              <span className={`font-bold text-sm ${actMargin <= 0 ? 'text-red-600' : actMargin <= 2 ? 'text-orange-600' : 'text-emerald-600'}`}>
+                {actMargin > 0 ? `+${actMargin}` : actMargin} years
+              </span>
+              <span className="text-[10px] text-[#6b7589] block">{actMosca.text} Urgency</span>
+            </div>
+          </div>
+
+          {activeChartData.length === 0 ? (
+            <div className="h-48 flex items-center justify-center text-[#6b7589] text-xs">
+              No applications available for Mosca timeline comparison.
+            </div>
+          ) : (
+            <div style={{ height: `${chartHeight}px`, minHeight: `${chartHeight}px` }} className="w-full">
+              <ResponsiveContainer width="100%" height={chartHeight} minHeight={chartHeight}>
+                <BarChart
+                  data={activeChartData}
+                  layout="vertical"
+                  barSize={barSize}
+                  margin={{ top: 20, right: 40, left: 180, bottom: 10 }}
+                >
+                  <CartesianGrid strokeDasharray="3 3" stroke="#f0f2f5" horizontal={false} />
+                  <XAxis type="number" domain={[0, maxVal]} tick={{ fontSize: 11, fill: "#9aa1b1" }} unit=" yr" />
+                  <YAxis
+                    type="category"
+                    dataKey="name"
+                    width={180}
+                    tick={{ fontSize: 11, fill: "#374151", fontWeight: 600 }}
+                    interval={0}
+                  />
+                  <Tooltip
+                    content={({ active, payload }) => {
+                      if (!active || !payload || !payload.length) return null;
+                      const d = payload[0].payload;
+                      return (
+                        <div className="bg-white p-3 border border-[#dde1e9] rounded-md shadow-md text-xs space-y-1 z-50">
+                          <div className="font-bold text-[#1e3a5f] text-[13px] border-b border-[#dde1e9] pb-1 mb-1.5">
+                            {d.applicationName || d.name}
+                          </div>
+                          <div className="flex justify-between gap-4 text-[#64748b]">
+                            <span>Data Protection Duration (X):</span>
+                            <span className="font-bold text-[#1a1d23]">{d.X} yr</span>
+                          </div>
+                          <div className="flex justify-between gap-4 text-[#d97706]">
+                            <span>Migration Duration (Y):</span>
+                            <span className="font-bold text-[#1a1d23]">{d.Y} yr</span>
+                          </div>
+                          <div className="flex justify-between gap-4 text-[#1e3a5f] border-t border-[#f0f2f5] pt-1 font-semibold">
+                            <span>Total Required Duration (X + Y):</span>
+                            <span className="font-bold">{d.total} yr</span>
+                          </div>
+                          <div className="flex justify-between gap-4 text-[#6b7589]">
+                            <span>Quantum Risk Horizon (Z):</span>
+                            <span className="font-bold text-[#1a1d23]">{d.Z} yr</span>
+                          </div>
+                          <div className="flex justify-between gap-4 border-t border-[#f0f2f5] pt-1">
+                            <span className="font-semibold text-[#1a1d23]">Timing Margin Z - (X + Y):</span>
+                            <span className={`font-bold ${d.timingMargin <= 0 ? 'text-red-600' : d.timingMargin <= 2 ? 'text-orange-600' : 'text-emerald-600'}`}>
+                              {d.timingMargin > 0 ? `+${d.timingMargin}` : d.timingMargin} yr
+                            </span>
+                          </div>
+                        </div>
+                      );
+                    }}
+                  />
+                  <ReferenceLine
+                    x={actZ}
+                    stroke="#C2413B"
+                    strokeWidth={2}
+                    strokeDasharray="4 2"
+                    label={{
+                      position: "insideTop",
+                      value: `Risk Horizon (Z = ${actZ} yr, ${horizonYear})`,
+                      fill: "#C2413B",
+                      fontSize: 11,
+                      fontWeight: 700,
+                      offset: -20,
+                    }}
+                  />
+                  <Bar
+                    dataKey="X"
+                    stackId="a"
+                    fill="#64748b"
+                    name="Data Protection (X)"
+                    className="cursor-pointer"
+                    onClick={(entry: any) => {
+                      if (entry?.analysisId && onSelectAnalysis) {
+                        onSelectAnalysis(entry.analysisId);
+                      }
+                    }}
+                  />
+                  <Bar
+                    dataKey="Y"
+                    stackId="a"
+                    fill="#f59e0b"
+                    name="Migration Duration (Y)"
+                    className="cursor-pointer"
+                    onClick={(entry: any) => {
+                      if (entry?.analysisId && onSelectAnalysis) {
+                        onSelectAnalysis(entry.analysisId);
+                      }
+                    }}
+                  />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          )}
         </div>
 
         {/* Summary table */}

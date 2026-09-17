@@ -266,7 +266,11 @@ export function setCbom(cbom) {
         if (Object.hasOwn(prop, "name") && Object.hasOwn(prop, "value")) {
           switch (prop.name) {
             case "gitUrl":
-              model.codeOrigin.gitUrl = prop.value;
+              if (prop.value && !prop.value.startsWith("manual-upload-")) {
+                model.codeOrigin.gitUrl = prop.value;
+              } else {
+                model.codeOrigin.gitUrl = null;
+              }
               break;
             case "revision":
               model.codeOrigin.revision = prop.value;
@@ -288,7 +292,12 @@ export function showResultFromApi(cbomApi) {
   setCbom(cbom);
   setDependenciesMap(cbom)
   model.codeOrigin.projectIdentifier = cbomApi.projectIdentifier
-  model.codeOrigin.gitUrl = cbomApi.gitUrl;
+  if (cbomApi.gitUrl && !cbomApi.gitUrl.startsWith("manual-upload-")) {
+    model.codeOrigin.gitUrl = cbomApi.gitUrl;
+  } else {
+    model.codeOrigin.gitUrl = null;
+    model.codeOrigin.uploadedFileName = cbomApi.projectIdentifier || 'project-folder';
+  }
   model.codeOrigin.revision = cbomApi.branch;
   model.showResults = true;
 }
@@ -313,7 +322,7 @@ export function getCbomFromScan(scan) {
 
 export function getDetections() {
   var detections = getDetectionsFromCbom(model.cbom);
-  if (model.scanning.isScanning) {
+  if (model.scanning.isScanning && model.scanning.liveDetections && model.scanning.liveDetections.length > 0) {
     detections = model.scanning.liveDetections;
   }
   return removeBomRefFromDetectionNames(detections); 

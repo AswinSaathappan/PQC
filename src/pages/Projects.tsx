@@ -46,7 +46,7 @@ export default function Projects() {
                 <div className="grid grid-cols-3 gap-3 mb-3">
                   {[
                     { label: "Applications", value: p.apps },
-                    { label: "Crypto Assets", value: p.assets.toLocaleString() },
+                    { label: "Asset Occurrences", value: p.assets.toLocaleString() },
                     { label: "Last Updated", value: p.updated },
                   ].map(item => (
                     <div key={item.label} className="bg-[#f5f6f8] rounded-md p-2">

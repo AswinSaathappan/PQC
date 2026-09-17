@@ -48,7 +48,7 @@ services:
     environment:
       VUE_APP_HTTP_API_BASE: "http://localhost:8081"
       VUE_APP_WS_API_BASE: "ws://localhost:8081"
-      VUE_APP_TITLE: "CBOMkit"
+      VUE_APP_TITLE: "CBOM"
       VUE_APP_VIEWER_ONLY: ${CBOMKIT_VIEWER}
     ports:
       - "8001:8000"

@@ -1,5 +1,6 @@
 import { CryptoAsset } from '../models/crypto_asset';
 import { Cbom } from '../models/cbom';
+import { Analysis } from '../models/analysis';
 import { CryptavistaClassifier } from './cryptavista_classifier';
 import { v4 as uuidv4 } from 'uuid';
 import * as path from 'path';
@@ -145,8 +146,8 @@ export class CbomkitAdapter {
   /**
    * Process an official CycloneDX CBOM JSON.
    */
-  static async processOfficialCbom(analysisId: string, cbomJson: any): Promise<number> {
-    console.log(`[CBOMkit] Processing CBOM for ${analysisId}`);
+  static async processOfficialCbom(analysisId: string, cbomJson: any, isPartial = false): Promise<number> {
+    console.log(`[CBOMkit] Processing CBOM for ${analysisId}${isPartial ? ' (incremental partial)' : ''}`);
 
     // Persist the raw CBOM JSON
     await Cbom.updateOne(
@@ -155,11 +156,14 @@ export class CbomkitAdapter {
       { upsert: true }
     );
 
-    // Delete any previously stored assets for this analysis
-    await CryptoAsset.deleteMany({ analysisId });
-
-    // Step 1: Run quantum_safe compliance check on CBOMKit endpoint
-    const complianceResult = await this.runComplianceCheck(cbomJson);
+    // Step 1: Run quantum_safe compliance check on CBOMKit endpoint (skipped during incremental progress to prevent HTTP overhead)
+    const complianceResult: {
+      status: 'completed' | 'failed';
+      findingsMap: Map<string, { label: string; rawResult: string; isQuantumSafe: boolean | null; levelId: number; message: string }>;
+      rawResponse?: any;
+    } = isPartial
+      ? { status: 'completed', findingsMap: new Map(), rawResponse: undefined }
+      : await this.runComplianceCheck(cbomJson);
 
     const allComponents: any[] = cbomJson.components || [];
     const compMap = new Map<string, any>();
@@ -363,6 +367,9 @@ export class CbomkitAdapter {
             additionalContext: occ.additionalContext
           }];
 
+          const paramSet = c.cryptoProperties?.algorithmProperties?.parameterSetIdentifier;
+          const numericKeySize = paramSet && !isNaN(Number(paramSet)) ? Number(paramSet) : undefined;
+
           assetRows.push({
             assetId: uuidv4(),
             analysisId,
@@ -374,7 +381,8 @@ export class CbomkitAdapter {
             bomRef,
             occurrences: mappedOcc,
             algorithm: resolvedAlgorithm,
-            version: c.cryptoProperties?.algorithmProperties?.parameterSetIdentifier || '-',
+            version: paramSet || '-',
+            keySize: numericKeySize,
             usage: resolvedPrimitive || 'unspecified',
             discoverySource: 'CBOMkit',
             sourceLocation: formattedLoc,
@@ -391,6 +399,9 @@ export class CbomkitAdapter {
           });
         }
       } else {
+        const paramSet = c.cryptoProperties?.algorithmProperties?.parameterSetIdentifier;
+        const numericKeySize = paramSet && !isNaN(Number(paramSet)) ? Number(paramSet) : undefined;
+
         assetRows.push({
           assetId: uuidv4(),
           analysisId,
@@ -402,7 +413,8 @@ export class CbomkitAdapter {
           bomRef,
           occurrences: [],
           algorithm: resolvedAlgorithm,
-          version: c.cryptoProperties?.algorithmProperties?.parameterSetIdentifier || '-',
+          version: paramSet || '-',
+          keySize: numericKeySize,
           usage: resolvedPrimitive || 'unspecified',
           discoverySource: 'CBOMkit',
           sourceLocation: '-',
@@ -422,6 +434,10 @@ export class CbomkitAdapter {
 
     if (assetRows.length > 0) {
       await CryptoAsset.insertMany(assetRows);
+      const insertedIds = assetRows.map(r => r.assetId);
+      await CryptoAsset.deleteMany({ analysisId, assetId: { $nin: insertedIds } });
+    } else {
+      await CryptoAsset.deleteMany({ analysisId });
     }
 
     // Count ALL occurrences for the 5 summary cards
@@ -456,8 +472,41 @@ export class CbomkitAdapter {
       }
     );
 
+    // Also update Analysis document with authoritative summary and counts
+    await Analysis.updateOne(
+      { analysisId },
+      { 
+        $set: { 
+          cbomSummary: {
+            totalCryptoAssets: assetRows.length,
+            unknown: unknownCount,
+            notApplicable: notApplicableCount,
+            notQuantumSafe: notQuantumSafeCount,
+            quantumSafe: quantumSafeCount
+          },
+          detectedCryptoAssetCount: assetRows.length,
+          'stages.discover.assetCount': assetRows.length
+        } 
+      }
+    );
+
     console.log(`[CBOMkit] Authoritative inventory stored: ${assetRows.length} detected assets for ${analysisId}`);
     console.log(`[CBOMkit] 5-Card Summary -> Total: ${cbomSummary.totalCryptoAssets}, Unknown: ${cbomSummary.unknown}, Not Applicable: ${cbomSummary.notApplicable}, Not Quantum Safe: ${cbomSummary.notQuantumSafe}, Quantum Safe: ${cbomSummary.quantumSafe}`);
+
+    // Step 4: Synchronize authoritative CBOM to CBOMKit backend storage for visualization (on final completion)
+    if (!isPartial) {
+      try {
+        await axios.post(
+          `http://localhost:8081/api/v1/cbom/${encodeURIComponent(analysisId)}`,
+          cbomJson,
+          { headers: { 'Content-Type': 'application/json' }, timeout: 5000 }
+        );
+        console.log(`[CBOMkit] Authoritative CBOM synchronized to CBOMKit backend storage for ${analysisId}`);
+      } catch (syncErr) {
+        console.warn(`[CBOMkit] Notice: Could not sync CBOM to CBOMKit backend storage for ${analysisId}:`, (syncErr as Error).message);
+      }
+    }
+
     return assetRows.length;
   }
 }

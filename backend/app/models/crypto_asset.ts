@@ -24,8 +24,8 @@ export interface ICryptoAsset extends Document {
   quantumSafe?: boolean | null;
   cbomKitClassification?: string; // 'Unknown' | 'Not Applicable' | 'Not Quantum Safe' | 'Quantum Safe' (display/legacy)
   cbomkitClassification?: string; // 'quantum-safe' | 'quantum-vulnerable' | 'na' | 'unknown' (exact preserved)
-  cryptavistaQuantumRisk?: 'LOW' | 'MEDIUM' | 'HIGH' | 'UNKNOWN';
-  cryptavistaQuantumClassification?: 'QUANTUM_SAFE' | 'QUANTUM_RESISTANT' | 'NOT_QUANTUM_SAFE' | 'UNKNOWN';
+  cryptavistaQuantumRisk?: 'LOW' | 'MEDIUM' | 'HIGH' | 'UNKNOWN' | 'NOT_APPLICABLE' | 'NA' | 'CONTEXT_DEPENDENT';
+  cryptavistaQuantumClassification?: 'QUANTUM_SAFE' | 'QUANTUM_RESISTANT' | 'NOT_QUANTUM_SAFE' | 'UNKNOWN' | 'NOT_APPLICABLE' | 'CONTEXT_DEPENDENT';
   cryptavistaScore?: number | null; // 20 | 60 | 100 | null
   cryptavistaReason?: string;
   cryptavistaEvidence?: string[];

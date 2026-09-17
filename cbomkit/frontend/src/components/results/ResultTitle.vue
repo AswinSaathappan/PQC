@@ -82,7 +82,8 @@ export default {
       var title = "";
       if (
         model.scanning.isScanning &&
-        model.scanning.liveDetections.length === 0
+        model.scanning.liveDetections.length === 0 &&
+        getDetections().length === 0
       ) {
         title = "Scanning code for cryptographic assets...";
       } else if (

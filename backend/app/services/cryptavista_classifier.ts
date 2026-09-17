@@ -1,7 +1,7 @@
 import { RecommendationAdvisor, AssetClassificationEvidence } from './recommendation_advisor';
 
-export type CryptavistaRiskLevel = 'LOW' | 'MEDIUM' | 'HIGH' | 'UNKNOWN';
-export type CryptavistaQuantumClass = 'QUANTUM_SAFE' | 'QUANTUM_RESISTANT' | 'NOT_QUANTUM_SAFE' | 'UNKNOWN';
+export type CryptavistaRiskLevel = 'LOW' | 'MEDIUM' | 'HIGH' | 'UNKNOWN' | 'NOT_APPLICABLE' | 'CONTEXT_DEPENDENT';
+export type CryptavistaQuantumClass = 'QUANTUM_SAFE' | 'QUANTUM_RESISTANT' | 'NOT_QUANTUM_SAFE' | 'UNKNOWN' | 'NOT_APPLICABLE' | 'CONTEXT_DEPENDENT';
 
 export interface CryptavistaClassificationResult {
   cryptavistaQuantumRisk: CryptavistaRiskLevel;
@@ -32,7 +32,10 @@ export class CryptavistaClassifier {
   /**
    * Deterministic matching for standardized algorithms and known variants.
    */
-  public static matchDeterministicAlgorithm(name: string): {
+  public static matchDeterministicAlgorithm(
+    name: string,
+    keySizeEvidence?: number | string | null
+  ): {
     matched: boolean;
     quantumRisk: CryptavistaRiskLevel;
     quantumClassification: CryptavistaQuantumClass;
@@ -157,14 +160,45 @@ export class CryptavistaClassifier {
       };
     }
 
-    // Generic AES without explicit key length: default to MEDIUM if uncertain
-    if (upper === 'AES' || upper.startsWith('AES-') || upper.startsWith('AES/')) {
+    // AES variants without explicit key length in name (e.g. AES-GCM, AES):
+    // Verify actual key size from evidence before assigning risk score. Do not infer key size from name alone.
+    const normKeySize = keySizeEvidence !== undefined && keySizeEvidence !== null ? String(keySizeEvidence).trim() : '';
+    if (upper === 'AES-GCM' || upper === 'AES' || upper.startsWith('AES-') || upper.startsWith('AES/')) {
+      if (normKeySize === '256' || normKeySize === '256-bit' || normKeySize === '256BITS') {
+        return {
+          matched: true,
+          quantumRisk: 'LOW',
+          quantumClassification: 'QUANTUM_RESISTANT',
+          score: 20,
+          reason: `CRYPTAVISTA classifies ${clean} with verified 256-bit key (from CBOM evidence: parameterSetIdentifier=${normKeySize}) as Low Quantum Risk (20) based on NIST's analysis of symmetric cryptography and quantum attacks. AES-256 provides 128-bit quantum security against Grover's algorithm.`
+        };
+      }
+      if (normKeySize === '128' || normKeySize === '128-bit' || normKeySize === '128BITS') {
+        return {
+          matched: true,
+          quantumRisk: 'MEDIUM',
+          quantumClassification: 'QUANTUM_RESISTANT',
+          score: 60,
+          reason: `CRYPTAVISTA classifies ${clean} with verified 128-bit key (from CBOM evidence: parameterSetIdentifier=${normKeySize}) as Medium Quantum Risk (60) based on NIST's analysis of symmetric cryptography and quantum attacks (Grover's algorithm reduces effective security to 64 bits).`
+        };
+      }
+      if (normKeySize === '192' || normKeySize === '192-bit') {
+        return {
+          matched: true,
+          quantumRisk: 'LOW',
+          quantumClassification: 'QUANTUM_RESISTANT',
+          score: 20,
+          reason: `CRYPTAVISTA classifies ${clean} with verified 192-bit key (from CBOM evidence: parameterSetIdentifier=${normKeySize}) as Low Quantum Risk (20) based on NIST's analysis of symmetric cryptography.`
+        };
+      }
+
+      // Default to MEDIUM only if key size is not specified in available evidence
       return {
         matched: true,
         quantumRisk: 'MEDIUM',
         quantumClassification: 'QUANTUM_RESISTANT',
         score: 60,
-        reason: `CRYPTAVISTA classifies ${clean} as Medium Quantum Risk (60) based on conservative NIST symmetric risk estimation.`
+        reason: `CRYPTAVISTA classifies ${clean} as Medium Quantum Risk (60) based on conservative NIST symmetric risk estimation (key size not specified in available evidence).`
       };
     }
 
@@ -206,6 +240,34 @@ export class CryptavistaClassifier {
         quantumClassification: 'QUANTUM_RESISTANT',
         score: 20,
         reason: `CRYPTAVISTA classifies ${clean} as Low Quantum Risk (20) based on NIST's analysis of 256-bit symmetric stream ciphers.`
+      };
+    }
+
+    // 4. Legacy / Classically Insecure Symmetric Ciphers (outside quantum threat model)
+    const is3Des = upper.includes('3DES') || upper.includes('DES3') || upper.includes('TRIPLEDES');
+    const isRc4 = upper.includes('RC4') || upper.includes('ARCFOUR');
+    const isDes = !is3Des && (upper === 'DES' || upper.startsWith('DES-') || upper.startsWith('DES/') || upper.endsWith('-DES'));
+
+    if (is3Des || isRc4 || isDes) {
+      const cipher = is3Des ? '3DES' : isRc4 ? 'RC4' : 'DES';
+      return {
+        matched: true,
+        quantumRisk: 'NOT_APPLICABLE',
+        quantumClassification: 'NOT_APPLICABLE',
+        score: null,
+        reason: `CRYPTAVISTA evaluates ${clean} as outside the quantum threat model; vulnerable to deprecation under classical cryptanalysis. Migration to AES-GCM or ChaCha20-Poly1305 is recommended.`
+      };
+    }
+
+    // 5. Key Derivation Functions (PBKDF2, scrypt, Argon2, HKDF)
+    const isPbkdf2 = upper.includes('PBKDF2') || upper.includes('PBKDF');
+    if (isPbkdf2) {
+      return {
+        matched: true,
+        quantumRisk: 'CONTEXT_DEPENDENT',
+        quantumClassification: 'CONTEXT_DEPENDENT',
+        score: null,
+        reason: `CRYPTAVISTA classifies ${clean} as context-dependent; security is governed by the configured work factor (iterations), salt randomness, and underlying PRF/hash rather than a Shor-type public-key quantum vulnerability.`
       };
     }
 
@@ -263,6 +325,13 @@ export class CryptavistaClassifier {
     else if (rawResult === 'quantum-vulnerable' || rawResult === 'quantum_vulnerable') normCbomkitStatus = 'quantum-vulnerable';
     else if (rawResult === 'na' || rawResult === 'not-applicable' || rawResult === 'not applicable') normCbomkitStatus = 'na';
 
+    // Verify actual key size from evidence before assigning risk score (do not infer from name alone)
+    const keySizeEvidence =
+      ctx.cryptoProperties?.algorithmProperties?.parameterSetIdentifier ||
+      ctx.cryptoProperties?.algorithmProperties?.keyLength ||
+      ctx.cryptoProperties?.keyLength ||
+      (ctx.detectionContext?.match(/(\b128\b|\b192\b|\b256\b|\b512\b|\b1024\b|\b2048\b|\b3072\b|\b4096\b)/)?.[1]);
+
     // -------------------------------------------------------------
     // RULE SET 1: Recognized PQC Algorithms (Section 5)
     // -------------------------------------------------------------
@@ -274,7 +343,7 @@ export class CryptavistaClassifier {
     ].filter(Boolean) as string[];
 
     for (const n of checkNames) {
-      const match = this.matchDeterministicAlgorithm(n);
+      const match = this.matchDeterministicAlgorithm(n, keySizeEvidence);
       if (match && match.quantumClassification === 'QUANTUM_SAFE') {
         return {
           cryptavistaQuantumRisk: 'LOW',
@@ -292,7 +361,7 @@ export class CryptavistaClassifier {
     // -------------------------------------------------------------
     if (normCbomkitStatus === 'quantum-vulnerable') {
       for (const n of checkNames) {
-        const match = this.matchDeterministicAlgorithm(n);
+        const match = this.matchDeterministicAlgorithm(n, keySizeEvidence);
         if (match && match.quantumRisk === 'HIGH') {
           return {
             cryptavistaQuantumRisk: 'HIGH',
@@ -320,14 +389,17 @@ export class CryptavistaClassifier {
     // -------------------------------------------------------------
     if (normCbomkitStatus === 'na') {
       for (const n of checkNames) {
-        const match = this.matchDeterministicAlgorithm(n);
+        const match = this.matchDeterministicAlgorithm(n, keySizeEvidence);
         if (match) {
+          const evidenceStr = keySizeEvidence 
+            ? `Deterministic CRYPTAVISTA mapping applied for symmetric/hash primitive: ${n} (verified ${keySizeEvidence}-bit key from evidence)`
+            : `Deterministic CRYPTAVISTA mapping applied for symmetric/hash primitive: ${n}`;
           return {
             cryptavistaQuantumRisk: match.quantumRisk,
             cryptavistaQuantumClassification: match.quantumClassification,
             cryptavistaScore: match.score,
             cryptavistaReason: match.reason,
-            cryptavistaEvidence: [`Deterministic CRYPTAVISTA mapping applied for symmetric/hash primitive: ${n}`]
+            cryptavistaEvidence: [evidenceStr]
           };
         }
       }
@@ -349,7 +421,7 @@ export class CryptavistaClassifier {
 
     // Step 1: Exact asset/algorithm name
     if (ctx.componentName && !this.isGenericKeyLabel(ctx.componentName)) {
-      const match = this.matchDeterministicAlgorithm(ctx.componentName);
+      const match = this.matchDeterministicAlgorithm(ctx.componentName, keySizeEvidence);
       if (match) {
         evidenceList.push(`Step 1: Exact asset name matched ${ctx.componentName}`);
         return {
@@ -364,7 +436,7 @@ export class CryptavistaClassifier {
 
     // Step 2: Normalized algorithm name
     if (ctx.algorithmName && !this.isGenericKeyLabel(ctx.algorithmName)) {
-      const match = this.matchDeterministicAlgorithm(ctx.algorithmName);
+      const match = this.matchDeterministicAlgorithm(ctx.algorithmName, keySizeEvidence);
       if (match) {
         evidenceList.push(`Step 2: Normalized algorithm name matched ${ctx.algorithmName}`);
         return {
@@ -380,7 +452,7 @@ export class CryptavistaClassifier {
     // Step 3: cryptoProperties.algorithmName / algorithmProperties.name
     const propAlgo = ctx.cryptoProperties?.algorithmProperties?.name || ctx.cryptoProperties?.algorithmName;
     if (propAlgo && !this.isGenericKeyLabel(propAlgo)) {
-      const match = this.matchDeterministicAlgorithm(propAlgo);
+      const match = this.matchDeterministicAlgorithm(propAlgo, keySizeEvidence);
       if (match) {
         evidenceList.push(`Step 3: cryptoProperties.algorithmName matched ${propAlgo}`);
         return {

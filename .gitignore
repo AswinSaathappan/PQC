@@ -4,6 +4,8 @@ build/
 .cache/
 .env*
 !.env.example
+backend/.env
+scans/
 backend/uploads/*
 !backend/uploads/.gitkeep
 .vite/

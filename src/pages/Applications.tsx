@@ -1,24 +1,70 @@
 import { useState, useEffect } from "react";
-import { Plus, Target, CheckCircle, Clock, Layers } from "lucide-react";
+import { Plus, Target, CheckCircle, Clock, Layers, AlertCircle } from "lucide-react";
 
-export default function Applications({ onNewAnalysis, onNavigate }: { onNewAnalysis?: () => void; onNavigate?: (id: string) => void }) {
+function getAnalysisStatusBadge(status: string | undefined) {
+  const s = String(status || '').trim().toUpperCase();
+  if (s === 'RUNNING' || s === 'IN_PROGRESS' || s === 'IN PROGRESS') {
+    return (
+      <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-blue-600 bg-blue-50 px-2 py-0.5 rounded border border-blue-200">
+        <Clock size={10} /> In Progress
+      </span>
+    );
+  }
+  if (s === 'COMPLETED' || s === 'COMPLETE' || s === 'DONE') {
+    return (
+      <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">
+        <CheckCircle size={10} /> Completed
+      </span>
+    );
+  }
+  if (s === 'FAILED' || s === 'ERROR') {
+    return (
+      <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-red-600 bg-red-50 px-2 py-0.5 rounded border border-red-200">
+        <AlertCircle size={10} /> Failed
+      </span>
+    );
+  }
+  return (
+    <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-[#6b7589] bg-gray-50 px-2 py-0.5 rounded border border-gray-200">
+      <Clock size={10} /> {s === 'PENDING' ? 'Pending' : 'Created'}
+    </span>
+  );
+}
+
+export default function Applications({ onNewAnalysis, onNavigate, onSelectAnalysis }: { onNewAnalysis?: () => void; onNavigate?: (id: string) => void; onSelectAnalysis?: (id: string) => void }) {
   const [analyses, setAnalyses] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    let isMounted = true;
+
     async function fetchData() {
       try {
         const res = await fetch("http://localhost:3001/api/analyses");
         if (res.ok) {
           const data = await res.json();
-          setAnalyses(data);
+          if (isMounted) {
+            setAnalyses(data);
+          }
         }
       } catch (err) {
         console.error("Failed to fetch applications:", err);
+      } finally {
+        if (isMounted) {
+          setLoading(false);
+        }
       }
-      setLoading(false);
     }
+
     fetchData();
+
+    // Poll periodically so running analyses update in real-time when completed
+    const interval = setInterval(fetchData, 3000);
+
+    return () => {
+      isMounted = false;
+      clearInterval(interval);
+    };
   }, []);
 
   if (loading) {
@@ -67,7 +113,13 @@ export default function Applications({ onNewAnalysis, onNavigate }: { onNewAnaly
               <div key={app.analysisId} className="bg-white border border-[#dde1e9] rounded-lg overflow-hidden shadow-sm">
                 
                 {/* Header */}
-                <div className="px-5 py-4 flex items-center justify-between border-b border-[#f0f2f5] hover:bg-[#f9fafb] transition-colors cursor-pointer" onClick={() => onNavigate && onNavigate(`cbom:${app.analysisId}`)}>
+                <div className="px-5 py-4 flex items-center justify-between border-b border-[#f0f2f5] hover:bg-[#f9fafb] transition-colors cursor-pointer" onClick={() => {
+                  if (onSelectAnalysis) onSelectAnalysis(app.analysisId);
+                  try {
+                    localStorage.setItem("cryptavista_selected_analysis_id", app.analysisId);
+                  } catch {}
+                  if (onNavigate) onNavigate(`cbom:${app.analysisId}`);
+                }}>
                   <div className="flex items-center gap-3">
                     <div className="w-8 h-8 rounded-md bg-blue-50 border border-blue-100 flex items-center justify-center text-blue-600">
                       <Target size={16} />
@@ -75,7 +127,7 @@ export default function Applications({ onNewAnalysis, onNavigate }: { onNewAnaly
                     <div>
                       <div className="text-[13px] font-bold text-[#1a1d23]">{app.applicationName}</div>
                       <div className="text-[11px] text-[#6b7589] flex items-center gap-2 mt-0.5">
-                        <span>Source Type: Repository</span>
+                        <span>Source Type: {app.targetType === 'folder' ? 'Project Folder' : 'Source Repository'}</span>
                       </div>
                     </div>
                   </div>
@@ -84,15 +136,7 @@ export default function Applications({ onNewAnalysis, onNavigate }: { onNewAnaly
                     <div className="text-right">
                       <div className="text-[10px] font-semibold text-[#6b7589] uppercase tracking-wide">Analysis Status</div>
                       <div className="flex items-center gap-1.5 mt-1">
-                        {app.currentStage === 'DISCOVER' ? (
-                          <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-blue-600 bg-blue-50 px-2 py-0.5 rounded border border-blue-200">
-                            <Clock size={10} /> In Progress
-                          </span>
-                        ) : (
-                          <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">
-                            <CheckCircle size={10} /> Completed
-                          </span>
-                        )}
+                        {getAnalysisStatusBadge(app.status)}
                       </div>
                     </div>
                     <div className="text-right">

@@ -1,10 +1,100 @@
 import { useState, useEffect } from "react";
-import { Layers, Key, Activity, Server, Target, AlertTriangle } from "lucide-react";
+import { Layers, Key, Activity, Server, Target } from "lucide-react";
 
 const kpiIcons = [Layers, Key, Activity, Target, Server];
 
+function getAppStageStatuses(analysis: any): {
+  discover: string;
+  assess: string;
+  prioritize: string;
+  recommendation: string;
+} {
+  const appStatus = String(analysis.status || '').trim().toUpperCase();
+  const currentStage = String(analysis.currentStage || '').trim().toUpperCase();
+
+  // 1. Discover
+  const discRaw = String(analysis.stages?.discover?.status || '').trim().toUpperCase();
+  let discover = 'PENDING';
+  if (discRaw === 'RUNNING' || (appStatus === 'RUNNING' && (currentStage === 'DISCOVER' || !currentStage))) {
+    discover = 'RUNNING';
+  } else if (discRaw === 'FAILED' || (appStatus === 'FAILED' && discRaw !== 'COMPLETED')) {
+    discover = 'FAILED';
+  } else if (discRaw === 'COMPLETED' || appStatus === 'COMPLETED') {
+    discover = 'COMPLETED';
+  } else if (appStatus === 'RUNNING') {
+    discover = 'RUNNING';
+  } else if (discRaw) {
+    discover = discRaw;
+  }
+
+  // 2. Assess
+  const assessRaw = String(analysis.stages?.assess?.status || analysis.stages?.assessment?.status || '').trim().toUpperCase();
+  let assess = 'PENDING';
+  if (assessRaw && assessRaw !== 'WAITING') {
+    assess = assessRaw;
+  } else if (appStatus === 'RUNNING' && currentStage === 'ASSESS') {
+    assess = 'RUNNING';
+  } else if (appStatus === 'FAILED') {
+    assess = assessRaw || 'FAILED';
+  } else if (
+    appStatus === 'COMPLETED' &&
+    ((analysis.cbomSummary && typeof analysis.cbomSummary.totalCryptoAssets === 'number') ||
+      (typeof analysis.detectedCryptoAssetCount === 'number' && analysis.detectedCryptoAssetCount > 0) ||
+      discRaw === 'COMPLETED')
+  ) {
+    assess = 'COMPLETED';
+  } else if (assessRaw) {
+    assess = assessRaw;
+  }
+
+  // 3. Prioritize
+  const prioRaw = String(analysis.stages?.prioritize?.status || analysis.stages?.priority?.status || '').trim().toUpperCase();
+  let prioritize = 'PENDING';
+  if (prioRaw && prioRaw !== 'WAITING') {
+    prioritize = prioRaw;
+  } else if (appStatus === 'RUNNING' && currentStage === 'PRIORITIZE') {
+    prioritize = 'RUNNING';
+  } else if (appStatus === 'FAILED') {
+    prioritize = prioRaw || 'WAITING';
+  } else if (analysis.priorityScore !== undefined || analysis.priorityGrade !== undefined || analysis.priority !== undefined) {
+    prioritize = 'COMPLETED';
+  } else if (appStatus === 'COMPLETED') {
+    prioritize = 'COMPLETED';
+  } else if (prioRaw) {
+    prioritize = prioRaw;
+  }
+
+  // 4. Recommendation
+  const recRaw = String(
+    analysis.stages?.recommend?.status ||
+    analysis.stages?.recommendation?.status ||
+    analysis.stages?.recommendations?.status ||
+    ''
+  ).trim().toUpperCase();
+  let recommendation = 'PENDING';
+  if (recRaw && recRaw !== 'WAITING') {
+    recommendation = recRaw;
+  } else if (
+    appStatus === 'RUNNING' &&
+    (currentStage === 'RECOMMEND' || currentStage === 'RECOMMENDATION')
+  ) {
+    recommendation = 'RUNNING';
+  } else if (appStatus === 'FAILED') {
+    recommendation = recRaw || 'WAITING';
+  } else if (Array.isArray(analysis.recommendations) && analysis.recommendations.length > 0) {
+    recommendation = 'COMPLETED';
+  } else if (appStatus === 'COMPLETED') {
+    recommendation = 'COMPLETED';
+  } else if (recRaw) {
+    recommendation = recRaw;
+  }
+
+  return { discover, assess, prioritize, recommendation };
+}
+
 export default function Overview({ onNavigate, analyses = [], selectedAnalysisId }: { onNavigate?: (id: string) => void; analyses?: any[]; selectedAnalysisId?: string }) {
   const [totalAssets, setTotalAssets] = useState(0);
+  const [localAnalyses, setLocalAnalyses] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -14,6 +104,7 @@ export default function Overview({ onNavigate, analyses = [], selectedAnalysisId
         const res = await fetch("http://localhost:3001/api/analyses");
         if (res.ok) {
           const analysesData = await res.json();
+          setLocalAnalyses(analysesData);
           let total = 0;
           analysesData.forEach((a: any) => {
             total += (typeof a.detectedCryptoAssetCount === 'number' ? a.detectedCryptoAssetCount : (a.stages?.discover?.assetCount || 0));
@@ -28,12 +119,12 @@ export default function Overview({ onNavigate, analyses = [], selectedAnalysisId
     fetchData();
   }, []);
 
-  const totalFromProps = analyses.reduce((sum, a) => sum + (typeof a.detectedCryptoAssetCount === 'number' ? a.detectedCryptoAssetCount : (a.stages?.discover?.assetCount || 0)), 0);
-  const displayTotalAssets = analyses.length > 0 ? totalFromProps : totalAssets;
+  const displayAnalyses = analyses.length > 0 ? analyses : localAnalyses;
+  const totalFromProps = displayAnalyses.reduce((sum, a) => sum + (typeof a.detectedCryptoAssetCount === 'number' ? a.detectedCryptoAssetCount : (a.stages?.discover?.assetCount || 0)), 0);
+  const displayTotalAssets = displayAnalyses.length > 0 ? totalFromProps : totalAssets;
 
-  const selectedApp = analyses.find(a => a.analysisId === selectedAnalysisId);
-  const totalApplications = analyses.length;
-  const applicationsAnalyzed = analyses.filter(a => a.stages?.discover?.status === 'COMPLETED').length;
+  const totalApplications = displayAnalyses.length;
+  const applicationsAnalyzed = displayAnalyses.filter(a => a.stages?.discover?.status === 'COMPLETED').length;
   
   const kpis = [
     { label: "Total Applications", value: totalApplications.toString() },
@@ -141,31 +232,70 @@ export default function Overview({ onNavigate, analyses = [], selectedAnalysisId
                 <h3 className="text-[14px] font-semibold text-[#1a1d23]">Recent Analyses</h3>
               </div>
               <div className="divide-y divide-gray-100">
-                {analyses.map(analysis => (
-                  <div key={analysis.analysisId} className="px-5 py-4 flex items-center justify-between hover:bg-gray-50 transition-colors">
-                    <div>
-                      <div className="font-semibold text-gray-900">{analysis.applicationName}</div>
-                      <div className="text-xs text-gray-500 mt-1">ID: {analysis.analysisId} • Created: {new Date(analysis.createdAt).toLocaleDateString()}</div>
+                {displayAnalyses.map(analysis => {
+                  const stages = getAppStageStatuses(analysis);
+                  return (
+                    <div key={analysis.analysisId} className="px-5 py-4 flex flex-col lg:flex-row lg:items-center justify-between gap-4 hover:bg-gray-50 transition-colors">
+                      <div className="min-w-0 pr-2">
+                        <div className="font-semibold text-gray-900 truncate" title={analysis.applicationName}>{analysis.applicationName}</div>
+                        <div className="text-xs text-gray-500 mt-1 truncate">ID: {analysis.analysisId} • Created: {new Date(analysis.createdAt).toLocaleDateString()}</div>
+                      </div>
+
+                      <div className="flex items-center gap-4 sm:gap-6 flex-wrap sm:flex-nowrap flex-shrink-0">
+                        {/* 1. Discover */}
+                        <div className="text-right">
+                          <div className="text-[10px] font-semibold text-[#6b7589] uppercase tracking-wide">Discover</div>
+                          <div className="text-[12px] font-semibold text-[#1a1d23] mt-0.5">
+                            {stages.discover}
+                          </div>
+                        </div>
+
+                        {/* 2. Runtime */}
+                        <div className="text-right">
+                          <div className="text-[10px] font-semibold text-[#6b7589] uppercase tracking-wide">Runtime</div>
+                          <div className="text-[12px] font-semibold text-[#1a1d23] mt-0.5">
+                            {analysis.runtimeEnabled === true ? 'ENABLED' : 'DISABLED'}
+                          </div>
+                        </div>
+
+                        {/* 3. Assess */}
+                        <div className="text-right">
+                          <div className="text-[10px] font-semibold text-[#6b7589] uppercase tracking-wide">Assess</div>
+                          <div className="text-[12px] font-semibold text-[#1a1d23] mt-0.5">
+                            {stages.assess}
+                          </div>
+                        </div>
+
+                        {/* 4. Prioritize */}
+                        <div className="text-right">
+                          <div className="text-[10px] font-semibold text-[#6b7589] uppercase tracking-wide">Prioritize</div>
+                          <div className="text-[12px] font-semibold text-[#1a1d23] mt-0.5">
+                            {stages.prioritize}
+                          </div>
+                        </div>
+
+                        {/* 5. Recommendation */}
+                        <div className="text-right">
+                          <div className="text-[10px] font-semibold text-[#6b7589] uppercase tracking-wide">Recommendation</div>
+                          <div className="text-[12px] font-semibold text-[#1a1d23] mt-0.5">
+                            {stages.recommendation}
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center text-sm flex-shrink-0">
+                        {onNavigate && (
+                          <button 
+                            onClick={() => onNavigate(`cbom:${analysis.analysisId}`)}
+                            className="text-blue-600 hover:text-blue-800 font-medium text-sm whitespace-nowrap"
+                          >
+                            View CBOM &rarr;
+                          </button>
+                        )}
+                      </div>
                     </div>
-                    <div className="flex items-center gap-4 text-sm">
-                      <span className={`px-2.5 py-1 rounded-full text-xs font-medium border ${
-                        analysis.stages?.discover?.status === 'COMPLETED' 
-                          ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
-                          : 'bg-blue-50 text-blue-700 border-blue-200'
-                      }`}>
-                        Discovery: {analysis.stages?.discover?.status || 'PENDING'}
-                      </span>
-                      {onNavigate && (
-                        <button 
-                          onClick={() => onNavigate(`cbom:${analysis.analysisId}`)}
-                          className="text-blue-600 hover:text-blue-800 font-medium text-sm"
-                        >
-                          View CBOM &rarr;
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             </div>
           </>

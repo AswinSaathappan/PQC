@@ -1,34 +1,110 @@
 import { useState, useEffect } from "react";
-import { Plus, Target, CheckCircle, Clock, Layers, AlertCircle } from "lucide-react";
+import { Plus, Target, Layers } from "lucide-react";
 
-function getAnalysisStatusBadge(status: string | undefined) {
-  const s = String(status || '').trim().toUpperCase();
-  if (s === 'RUNNING' || s === 'IN_PROGRESS' || s === 'IN PROGRESS') {
-    return (
-      <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-blue-600 bg-blue-50 px-2 py-0.5 rounded border border-blue-200">
-        <Clock size={10} /> In Progress
-      </span>
-    );
+function getAppStageStatuses(app: any): {
+  discover: string;
+  assess: string;
+  prioritize: string;
+  recommendation: string;
+} {
+  const appStatus = String(app.status || '').trim().toUpperCase();
+  const currentStage = String(app.currentStage || '').trim().toUpperCase();
+
+  // 1. Discover
+  const discRaw = String(app.stages?.discover?.status || '').trim().toUpperCase();
+  let discover = 'PENDING';
+  if (discRaw === 'RUNNING' || (appStatus === 'RUNNING' && (currentStage === 'DISCOVER' || !currentStage))) {
+    discover = 'RUNNING';
+  } else if (discRaw === 'FAILED' || (appStatus === 'FAILED' && discRaw !== 'COMPLETED')) {
+    discover = 'FAILED';
+  } else if (discRaw === 'COMPLETED' || appStatus === 'COMPLETED') {
+    discover = 'COMPLETED';
+  } else if (appStatus === 'RUNNING') {
+    discover = 'RUNNING';
+  } else if (discRaw) {
+    discover = discRaw;
   }
+
+  // 2. Assess
+  const assessRaw = String(app.stages?.assess?.status || app.stages?.assessment?.status || '').trim().toUpperCase();
+  let assess = 'PENDING';
+  if (assessRaw && assessRaw !== 'WAITING') {
+    assess = assessRaw;
+  } else if (appStatus === 'RUNNING' && currentStage === 'ASSESS') {
+    assess = 'RUNNING';
+  } else if (appStatus === 'FAILED') {
+    assess = assessRaw || 'FAILED';
+  } else if (
+    appStatus === 'COMPLETED' &&
+    ((app.cbomSummary && typeof app.cbomSummary.totalCryptoAssets === 'number') ||
+      (typeof app.detectedCryptoAssetCount === 'number' && app.detectedCryptoAssetCount > 0) ||
+      discRaw === 'COMPLETED')
+  ) {
+    assess = 'COMPLETED';
+  } else if (assessRaw) {
+    assess = assessRaw;
+  }
+
+  // 3. Prioritize
+  const prioRaw = String(app.stages?.prioritize?.status || app.stages?.priority?.status || '').trim().toUpperCase();
+  let prioritize = 'PENDING';
+  if (prioRaw && prioRaw !== 'WAITING') {
+    prioritize = prioRaw;
+  } else if (appStatus === 'RUNNING' && currentStage === 'PRIORITIZE') {
+    prioritize = 'RUNNING';
+  } else if (appStatus === 'FAILED') {
+    prioritize = prioRaw || 'WAITING';
+  } else if (app.priorityScore !== undefined || app.priorityGrade !== undefined || app.priority !== undefined) {
+    prioritize = 'COMPLETED';
+  } else if (appStatus === 'COMPLETED') {
+    prioritize = 'COMPLETED';
+  } else if (prioRaw) {
+    prioritize = prioRaw;
+  }
+
+  // 4. Recommendation
+  const recRaw = String(
+    app.stages?.recommend?.status ||
+    app.stages?.recommendation?.status ||
+    app.stages?.recommendations?.status ||
+    ''
+  ).trim().toUpperCase();
+  let recommendation = 'PENDING';
+  if (recRaw && recRaw !== 'WAITING') {
+    recommendation = recRaw;
+  } else if (
+    appStatus === 'RUNNING' &&
+    (currentStage === 'RECOMMEND' || currentStage === 'RECOMMENDATION')
+  ) {
+    recommendation = 'RUNNING';
+  } else if (appStatus === 'FAILED') {
+    recommendation = recRaw || 'WAITING';
+  } else if (Array.isArray(app.recommendations) && app.recommendations.length > 0) {
+    recommendation = 'COMPLETED';
+  } else if (appStatus === 'COMPLETED') {
+    recommendation = 'COMPLETED';
+  } else if (recRaw) {
+    recommendation = recRaw;
+  }
+
+  return { discover, assess, prioritize, recommendation };
+}
+
+function getAnalysisStatusDisplay(status: string | undefined): { text: string; colorClass: string } {
+  const s = String(status || '').trim().toUpperCase();
   if (s === 'COMPLETED' || s === 'COMPLETE' || s === 'DONE') {
-    return (
-      <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">
-        <CheckCircle size={10} /> Completed
-      </span>
-    );
+    return { text: 'COMPLETED', colorClass: 'text-emerald-600' };
   }
   if (s === 'FAILED' || s === 'ERROR') {
-    return (
-      <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-red-600 bg-red-50 px-2 py-0.5 rounded border border-red-200">
-        <AlertCircle size={10} /> Failed
-      </span>
-    );
+    return { text: 'FAILED', colorClass: 'text-red-600' };
   }
-  return (
-    <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-[#6b7589] bg-gray-50 px-2 py-0.5 rounded border border-gray-200">
-      <Clock size={10} /> {s === 'PENDING' ? 'Pending' : 'Created'}
-    </span>
-  );
+  if (s === 'RUNNING' || s === 'IN_PROGRESS' || s === 'IN PROGRESS') {
+    return { text: 'PROCESSING', colorClass: 'text-orange-600' };
+  }
+  if (s === 'PENDING') {
+    return { text: 'PENDING', colorClass: 'text-[#1a1d23]' };
+  }
+  return { text: s || 'CREATED', colorClass: 'text-[#1a1d23]' };
 }
 
 export default function Applications({ onNewAnalysis, onNavigate, onSelectAnalysis }: { onNewAnalysis?: () => void; onNavigate?: (id: string) => void; onSelectAnalysis?: (id: string) => void }) {
@@ -109,53 +185,102 @@ export default function Applications({ onNewAnalysis, onNavigate, onSelectAnalys
           </div>
         ) : (
           <div className="grid grid-cols-1 gap-4 mt-6">
-            {analyses.map(app => (
-              <div key={app.analysisId} className="bg-white border border-[#dde1e9] rounded-lg overflow-hidden shadow-sm">
-                
-                {/* Header */}
-                <div className="px-5 py-4 flex items-center justify-between border-b border-[#f0f2f5] hover:bg-[#f9fafb] transition-colors cursor-pointer" onClick={() => {
-                  if (onSelectAnalysis) onSelectAnalysis(app.analysisId);
-                  try {
-                    localStorage.setItem("cryptavista_selected_analysis_id", app.analysisId);
-                  } catch {}
-                  if (onNavigate) onNavigate(`cbom:${app.analysisId}`);
-                }}>
-                  <div className="flex items-center gap-3">
-                    <div className="w-8 h-8 rounded-md bg-blue-50 border border-blue-100 flex items-center justify-center text-blue-600">
-                      <Target size={16} />
-                    </div>
-                    <div>
-                      <div className="text-[13px] font-bold text-[#1a1d23]">{app.applicationName}</div>
-                      <div className="text-[11px] text-[#6b7589] flex items-center gap-2 mt-0.5">
-                        <span>Source Type: {app.targetType === 'folder' ? 'Project Folder' : 'Source Repository'}</span>
-                      </div>
-                    </div>
-                  </div>
+            {analyses.map(app => {
+              const stages = getAppStageStatuses(app);
+              const analysisStatus = getAnalysisStatusDisplay(app.status);
+              return (
+                <div key={app.analysisId} className="bg-white border border-[#dde1e9] rounded-lg overflow-hidden shadow-sm">
                   
-                  <div className="flex items-center gap-6">
-                    <div className="text-right">
-                      <div className="text-[10px] font-semibold text-[#6b7589] uppercase tracking-wide">Analysis Status</div>
-                      <div className="flex items-center gap-1.5 mt-1">
-                        {getAnalysisStatusBadge(app.status)}
+                  {/* Header */}
+                  <div className="px-5 py-4 flex flex-col xl:flex-row xl:items-center justify-between gap-4 border-b border-[#f0f2f5] hover:bg-[#f9fafb] transition-colors cursor-pointer" onClick={() => {
+                    if (onSelectAnalysis) onSelectAnalysis(app.analysisId);
+                    try {
+                      localStorage.setItem("cryptavista_selected_analysis_id", app.analysisId);
+                    } catch {}
+                    if (onNavigate) onNavigate(`cbom:${app.analysisId}`);
+                  }}>
+                    <div className="flex items-center gap-3 min-w-0 pr-2">
+                      <div className="w-8 h-8 rounded-md bg-blue-50 border border-blue-100 flex items-center justify-center text-blue-600 flex-shrink-0">
+                        <Target size={16} />
+                      </div>
+                      <div className="min-w-0">
+                        <div className="text-[13px] font-bold text-[#1a1d23] truncate" title={app.applicationName}>
+                          {app.applicationName}
+                        </div>
+                        <div className="text-[11px] text-[#6b7589] flex items-center gap-2 mt-0.5 truncate">
+                          <span>Source Type: {app.targetType === 'folder' ? 'Project Folder' : 'Source Repository'}</span>
+                        </div>
                       </div>
                     </div>
-                    <div className="text-right">
-                      <div className="text-[10px] font-semibold text-[#6b7589] uppercase tracking-wide">Discovery</div>
-                      <div className="text-[12px] font-semibold text-[#1a1d23] mt-0.5">
-                        {app.stages?.discover?.status || 'PENDING'}
+                    
+                    <div className="flex items-center gap-4 sm:gap-6 flex-wrap sm:flex-nowrap flex-shrink-0">
+                      {/* 1. Discover */}
+                      <div className="text-right">
+                        <div className="text-[10px] font-semibold text-[#6b7589] uppercase tracking-wide">Discover</div>
+                        <div className="text-[12px] font-semibold text-[#1a1d23] mt-0.5">
+                          {stages.discover}
+                        </div>
                       </div>
-                    </div>
-                    <div className="text-right">
-                      <div className="text-[10px] font-semibold text-[#6b7589] uppercase tracking-wide">Created</div>
-                      <div className="text-[12px] font-semibold text-[#1a1d23] mt-0.5">
-                        {new Date(app.createdAt).toLocaleDateString()}
+
+                      {/* 2. Runtime */}
+                      <div className="text-right">
+                        <div className="text-[10px] font-semibold text-[#6b7589] uppercase tracking-wide">Runtime</div>
+                        <div className="text-[12px] font-semibold text-[#1a1d23] mt-0.5">
+                          {app.runtimeEnabled ? 'ENABLED' : 'DISABLED'}
+                        </div>
+                      </div>
+
+                      {/* 3. Assess */}
+                      <div className="text-right">
+                        <div className="text-[10px] font-semibold text-[#6b7589] uppercase tracking-wide">Assess</div>
+                        <div className="text-[12px] font-semibold text-[#1a1d23] mt-0.5">
+                          {stages.assess}
+                        </div>
+                      </div>
+
+                      {/* 4. Prioritize */}
+                      <div className="text-right">
+                        <div className="text-[10px] font-semibold text-[#6b7589] uppercase tracking-wide">Prioritize</div>
+                        <div className="text-[12px] font-semibold text-[#1a1d23] mt-0.5">
+                          {stages.prioritize}
+                        </div>
+                      </div>
+
+                      {/* 5. Recommendation */}
+                      <div className="text-right">
+                        <div className="text-[10px] font-semibold text-[#6b7589] uppercase tracking-wide">Recommendation</div>
+                        <div className="text-[12px] font-semibold text-[#1a1d23] mt-0.5">
+                          {stages.recommendation}
+                        </div>
+                      </div>
+
+                      {/* Divider */}
+                      <div className="hidden sm:block h-6 w-[1px] bg-[#dde1e9]" />
+
+                      {/* 6. Analysis Status */}
+                      <div className="text-right">
+                        <div className="text-[10px] font-semibold text-[#6b7589] uppercase tracking-wide">Analysis Status</div>
+                        <div className={`text-[12px] font-semibold mt-0.5 ${analysisStatus.colorClass}`}>
+                          {analysisStatus.text}
+                        </div>
+                      </div>
+
+                      {/* Divider */}
+                      <div className="hidden sm:block h-6 w-[1px] bg-[#dde1e9]" />
+
+                      {/* 7. Created */}
+                      <div className="text-right">
+                        <div className="text-[10px] font-semibold text-[#6b7589] uppercase tracking-wide">Created</div>
+                        <div className="text-[12px] font-semibold text-[#1a1d23] mt-0.5">
+                          {new Date(app.createdAt).toLocaleDateString()}
+                        </div>
                       </div>
                     </div>
                   </div>
-                </div>
 
-              </div>
-            ))}
+                </div>
+              );
+            })}
           </div>
         )}
       </div>

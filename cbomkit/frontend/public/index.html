@@ -25,6 +25,30 @@
             },
           };
         </script>
+        <style id="hide-cbom-footer">
+          footer, c4d-footer-container, c4d-footer, .bx--footer, .c4d--footer, [size="short"] {
+            display: none !important;
+            visibility: hidden !important;
+            height: 0 !important;
+            max-height: 0 !important;
+            overflow: hidden !important;
+          }
+          .search-button.folder-enabled,
+          .search-button:not([disabled]) {
+            cursor: pointer !important;
+            pointer-events: auto !important;
+            opacity: 1 !important;
+          }
+          .folder-plus-icon,
+          .binary-box-icon {
+            width: 16px !important;
+            height: 16px !important;
+            fill: currentColor !important;
+            display: inline-block !important;
+            vertical-align: middle !important;
+            pointer-events: none !important;
+          }
+        </style>
   </head>
   <body>
     <noscript>

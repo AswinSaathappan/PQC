@@ -12,7 +12,9 @@ import { Recommendation } from '../models/recommendation';
 import { RecommendationAdvisor } from '../services/recommendation_advisor';
 import { TargetService } from '../services/target_service';
 import { LocalScanner } from '../services/local_scanner';
+import { BinaryScanner } from '../services/binary_scanner';
 import fs from 'fs';
+import path from 'path';
 
 const router = express.Router();
 const upload = multer({ dest: 'uploads/' });
@@ -53,10 +55,10 @@ router.post('/', upload.single('file'), async (req: Request, res: Response): Pro
     await analysis.save();
 
     // Start background processing:
-    // For folder: wait until folder archive is uploaded.
+    // For folder / binary: wait until archive / binary file is uploaded in CBOMKit.
     // For source_code / Git: start processAnalysis so it waits for CBOMKit scan result when user scans in CBOMKit.
-    if (resolvedTargetType === 'source_code' || repositoryUrl || req.file?.path) {
-      processAnalysis(analysisId, repositoryUrl, req.file?.path, resolvedTargetType, branch, commit);
+    if ((resolvedTargetType === 'source_code' && !req.file?.path) || repositoryUrl || (resolvedTargetType === 'folder' && req.file?.path) || (resolvedTargetType === 'binary' && req.file?.path)) {
+      processAnalysis(analysisId, repositoryUrl, req.file?.path, resolvedTargetType, branch, commit, req.file?.originalname);
     }
 
     res.status(201).json(analysis);
@@ -76,9 +78,10 @@ router.post('/:id/scan', upload.single('file'), async (req: Request, res: Respon
       return;
     }
 
-    const { repositoryUrl, branch, commit } = req.body;
+    const { repositoryUrl, branch, commit, targetType: reqTargetType } = req.body;
     const uploadedFilePath = req.file?.path;
-    const resolvedTargetType = (analysis.targetType === 'folder' || req.file) ? 'folder' : 'source_code';
+    const originalFilename = req.file?.originalname;
+    const resolvedTargetType = reqTargetType || (analysis.targetType === 'binary' ? 'binary' : analysis.targetType === 'folder' ? 'folder' : req.file ? 'folder' : 'source_code');
 
     const updateDoc: any = {
       status: 'RUNNING',
@@ -103,7 +106,7 @@ router.post('/:id/scan', upload.single('file'), async (req: Request, res: Respon
     await Analysis.updateOne({ analysisId }, { $set: updateDoc });
 
     const effectiveRepoUrl = (repositoryUrl && repositoryUrl.trim()) || analysis.repositoryUrl;
-    processAnalysis(analysisId, effectiveRepoUrl, uploadedFilePath, resolvedTargetType, branch, commit);
+    processAnalysis(analysisId, effectiveRepoUrl, uploadedFilePath, resolvedTargetType, branch, commit, originalFilename);
 
     res.json({ success: true, status: 'RUNNING', analysisId });
   } catch (error) {
@@ -247,9 +250,19 @@ router.post('/:id/reprocess', async (req: Request, res: Response): Promise<void>
     const scanDir = TargetService.getTargetDir(analysisId);
     let cbomJson: any = null;
 
+    const analysis = await Analysis.findOne({ analysisId });
     if (fs.existsSync(scanDir)) {
-      console.log(`[Reprocess: ${analysisId}] Re-scanning extracted target directory: ${scanDir}`);
-      cbomJson = await LocalScanner.scanDirectory(scanDir);
+      if (analysis?.targetType === 'binary') {
+        const files = fs.readdirSync(scanDir);
+        if (files.length > 0) {
+          const binFile = path.join(scanDir, files[0]);
+          console.log(`[Reprocess: ${analysisId}] Re-scanning staged binary file: ${binFile}`);
+          cbomJson = await BinaryScanner.scanBinary(binFile, files[0]);
+        }
+      } else {
+        console.log(`[Reprocess: ${analysisId}] Re-scanning extracted target directory: ${scanDir}`);
+        cbomJson = await LocalScanner.scanDirectory(scanDir);
+      }
     } else {
       const cbomDoc = await Cbom.findOne({ analysisId });
       if (!cbomDoc) {
@@ -1604,7 +1617,7 @@ router.get('/:id/dependency-graph', async (req: Request, res: Response): Promise
 });
 
 
-async function processAnalysis(analysisId: string, repositoryUrl?: string, zipFilePath?: string, targetType?: string, branch?: string, commit?: string) {
+async function processAnalysis(analysisId: string, repositoryUrl?: string, zipFilePath?: string, targetType?: string, branch?: string, commit?: string, originalFilename?: string) {
   try {
     const updateDiscoverStage = async (status: string, extra: any = {}) => {
       const updateData: any = { 
@@ -1671,6 +1684,53 @@ async function processAnalysis(analysisId: string, repositoryUrl?: string, zipFi
       await Analysis.updateOne({ analysisId }, {
         $set: {
           scannedFiles: cbomJson.scannedFiles ?? 0,
+          scannedLines: cbomJson.scannedLines ?? 0
+        }
+      });
+
+      // 3. Process official CBOM (compliance check + quantum risk classification + MongoDB storage)
+      assetCount = await CbomkitAdapter.processOfficialCbom(analysisId, cbomJson, false);
+      console.log(`[Discovery: ${analysisId}] Processed and stored ${assetCount} cryptographic asset occurrences`);
+    } else if (targetType === 'binary') {
+      console.log(`[Discovery: ${analysisId}] Processing Binary / Library target from file: ${zipFilePath}`);
+      if (!zipFilePath) {
+        throw new Error('Binary / library file missing from upload request.');
+      }
+
+      // 1. Safely stage binary file to scans/<analysisId>/<originalFilename>
+      const safeFilename = originalFilename || path.basename(zipFilePath);
+      const stagedBinaryPath = await TargetService.prepareBinaryTarget(analysisId, zipFilePath, safeFilename);
+      console.log(`[Discovery: ${analysisId}] Safely staged binary file to ${stagedBinaryPath}`);
+
+      // 2. Discover cryptographic assets using BinaryScanner (Safe static binary analysis)
+      let lastAssetCount = 0;
+      let lastProgressSync = 0;
+      const cbomJson = await BinaryScanner.scanBinary(stagedBinaryPath, safeFilename, async (partialCbom, info) => {
+        const now = Date.now();
+        if (lastProgressSync === 0 || now - lastProgressSync >= 150 || info.assetCount > lastAssetCount) {
+          lastProgressSync = now;
+          lastAssetCount = info.assetCount;
+          try {
+            await Analysis.updateOne({ analysisId }, {
+              $set: {
+                scannedFiles: 1,
+                scannedLines: partialCbom.scannedLines ?? 0,
+                detectedCryptoAssetCount: info.assetCount,
+                'stages.discover.assetCount': info.assetCount
+              }
+            });
+
+            await CbomkitAdapter.processOfficialCbom(analysisId, partialCbom, true);
+          } catch (progressErr) {
+            console.warn(`[Discovery: ${analysisId}] Progress update note:`, (progressErr as Error).message);
+          }
+        }
+      });
+      console.log(`[Discovery: ${analysisId}] BinaryScanner generated CycloneDX CBOM with ${cbomJson.components?.length || 0} components`);
+
+      await Analysis.updateOne({ analysisId }, {
+        $set: {
+          scannedFiles: 1,
           scannedLines: cbomJson.scannedLines ?? 0
         }
       });

@@ -272,20 +272,21 @@ export class CbomkitAdapter {
       let cbomkitClassification = 'unknown';
       let quantumSafe: boolean | null = null;
 
-      if (complianceResult.status === 'completed') {
+      if (complianceResult.status === 'completed' && complianceResult.findingsMap.size > 0) {
         const finding = complianceResult.findingsMap.get(bomRef);
         if (finding) {
           cbomKitClassification = finding.label;
           cbomkitClassification = finding.rawResult;
           quantumSafe = finding.isQuantumSafe;
         } else {
-          // If CBOMKit returns no classification for a component, default to Unknown
-          cbomKitClassification = 'Unknown';
-          cbomkitClassification = 'unknown';
-          quantumSafe = null;
+          // If CBOMKit returns no classification for a component, fall back to local rule engine
+          const localClass = this.classifyCbomComponent(c);
+          cbomKitClassification = localClass.label;
+          cbomkitClassification = localClass.rawResult;
+          quantumSafe = localClass.isQuantumSafe;
         }
       } else {
-        // Fallback to local rule engine if compliance service failed
+        // Fallback to local rule engine if compliance service failed or running incremental partial progress
         const localClass = this.classifyCbomComponent(c);
         cbomKitClassification = localClass.label;
         cbomkitClassification = localClass.rawResult;

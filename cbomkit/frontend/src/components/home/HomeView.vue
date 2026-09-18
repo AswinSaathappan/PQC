@@ -3,7 +3,7 @@
     <div class="heading-outer">
       <div class="heading-inner">
         <h1 style="font-weight: 400; padding-bottom: 6px">
-          {{ getTitle }}
+          {{ isBinaryTarget ? 'CBOM' : getTitle }}
         </h1>
         <h4>
           Explore the use of cryptography in software with
@@ -57,7 +57,14 @@ export default {
   },
   computed: {
     getTitle,
-    isViewerOnly
+    isViewerOnly,
+    isBinaryTarget() {
+      if (typeof window !== "undefined") {
+        const urlParams = new URLSearchParams(window.location.search);
+        return urlParams.get("targetType") === "binary" || window.__targetType === "binary";
+      }
+      return false;
+    }
   }
 };
 </script>

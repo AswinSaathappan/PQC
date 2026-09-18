@@ -76,6 +76,9 @@ export const model = reactive({
     model.credentials.pat = null;
   },
   addError(errorStatus, message) {
+    if (errorStatus === ErrorStatus.FallBackLocalComplianceReport || errorStatus === "FallBackLocalComplianceReport") {
+      return;
+    }
     this.errors.push({status: errorStatus, message: message});
   },
   closeError(index) {

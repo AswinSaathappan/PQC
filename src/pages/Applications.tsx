@@ -217,7 +217,7 @@ export default function Applications({ onNewAnalysis, onNavigate, onSelectAnalys
                           {app.applicationName}
                         </div>
                         <div className="text-[11px] text-[#6b7589] flex items-center gap-2 mt-0.5 truncate">
-                          <span>Source Type: {app.targetType === 'folder' ? 'Project Folder' : 'Source Repository'}</span>
+                          <span>Source Type: {app.targetType === 'folder' ? 'Project Folder' : app.targetType === 'binary' ? 'Binary / Library' : 'Source Repository'}</span>
                         </div>
                       </div>
                     </div>

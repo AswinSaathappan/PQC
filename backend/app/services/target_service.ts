@@ -77,4 +77,41 @@ export class TargetService {
       throw new Error(`Zip extraction failed: ${(error as Error).message}`);
     }
   }
+
+  static async prepareBinaryTarget(analysisId: string, binaryFilePath: string, originalFilename?: string): Promise<string> {
+    const targetDir = path.join(SCANS_DIR, analysisId);
+    if (!fs.existsSync(SCANS_DIR)) {
+      fs.mkdirSync(SCANS_DIR, { recursive: true });
+    }
+
+    if (fs.existsSync(targetDir)) {
+      fs.rmSync(targetDir, { recursive: true, force: true });
+    }
+    fs.mkdirSync(targetDir, { recursive: true });
+
+    try {
+      if (!binaryFilePath || !fs.existsSync(binaryFilePath)) {
+        throw new Error(`Uploaded binary file not found at path: ${binaryFilePath || 'undefined'}`);
+      }
+
+      const safeFilename = path.basename(originalFilename || 'binary.bin');
+      const destPath = path.join(targetDir, safeFilename);
+
+      fs.copyFileSync(binaryFilePath, destPath);
+
+      // Cleanup original temp file safely
+      try {
+        if (fs.existsSync(binaryFilePath)) {
+          fs.unlinkSync(binaryFilePath);
+        }
+      } catch (cleanupErr) {
+        console.warn(`[TargetService] Non-fatal cleanup warning for ${binaryFilePath}:`, cleanupErr);
+      }
+
+      return destPath;
+    } catch (error) {
+      console.error(`Failed to stage binary file ${binaryFilePath}:`, error);
+      throw new Error(`Binary staging failed: ${(error as Error).message}`);
+    }
+  }
 }

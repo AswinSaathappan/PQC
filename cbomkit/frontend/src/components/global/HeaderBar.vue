@@ -3,17 +3,11 @@
 <template>
   <cv-header aria-label="Carbon header">
     <cv-header-name
-      href="https://research.ibm.com"
-      prefix="IBM"
-      target="_blank"
+      href="javascript:void(0)"
+      :prefix="getTitle"
     >
-      Research
     </cv-header-name>
     <template v-slot:header-global>
-      <h4 style="margin: auto 0px auto -25px; color: white">|</h4>
-      <span style="margin: auto auto auto 8px; color: white">
-        {{ getTitle }}
-      </span>
       <cv-header-global-action
         @click="updateTheme"
         :label="tipText"

@@ -91,11 +91,17 @@ export default {
   methods: {
     updateFolderIcon() {
       const urlParams = new URLSearchParams(window.location.search);
-      const isFolder = urlParams.get('targetType') === 'folder' || window.__targetType === 'folder';
-      if (isFolder && this.$el) {
+      const targetType = urlParams.get('targetType') || window.__targetType || '';
+      const isFolder = targetType === 'folder';
+      const isBinary = targetType === 'binary';
+      if (this.$el) {
         const magWrapper = this.$el.querySelector('.bx--search-magnifier, .cds--search-magnifier');
-        if (magWrapper && magWrapper.querySelector('svg')?.getAttribute('data-icon-type') !== 'plus') {
-          magWrapper.innerHTML = '<svg focusable="false" preserveAspectRatio="xMidYMid meet" xmlns="http://www.w3.org/2000/svg" fill="currentColor" aria-hidden="true" class="bx--search-magnifier-icon folder-plus-icon" data-icon-type="plus" width="16" height="16" viewBox="0 0 32 32"><path d="M17 15 17 8 15 8 15 15 8 15 8 17 15 17 15 24 17 24 17 17 24 17 24 15z"></path></svg>';
+        if (magWrapper) {
+          if (isFolder && magWrapper.querySelector('svg')?.getAttribute('data-icon-type') !== 'plus') {
+            magWrapper.innerHTML = '<svg focusable="false" preserveAspectRatio="xMidYMid meet" xmlns="http://www.w3.org/2000/svg" fill="currentColor" aria-hidden="true" class="bx--search-magnifier-icon folder-plus-icon" data-icon-type="plus" width="16" height="16" viewBox="0 0 32 32"><path d="M17 15 17 8 15 8 15 15 8 15 8 17 15 17 15 24 17 24 17 17 24 17 24 15z"></path></svg>';
+          } else if (isBinary && magWrapper.querySelector('svg')?.getAttribute('data-icon-type') !== 'box') {
+            magWrapper.innerHTML = '<svg focusable="false" preserveAspectRatio="xMidYMid meet" xmlns="http://www.w3.org/2000/svg" fill="currentColor" aria-hidden="true" class="bx--search-magnifier-icon binary-box-icon" data-icon-type="box" width="16" height="16" viewBox="0 0 32 32"><path d="m16 2.05-13 7.5v14.9l13 7.5 13-7.5v-14.9zm-1 2.31v6.86L4.35 17 3.5 16.5zm2 0 11.5 6.64-.85.5-10.65-5.8zm-13 14.88 11 6v6.86l-11-6.35zm13 12.86v-6.86l11-6v6.35z"></path></svg>';
+          }
         }
       }
     },
@@ -143,7 +149,8 @@ export default {
   opacity: 0;
   max-height: 0;
 }
-::v-deep .folder-plus-icon {
+::v-deep .folder-plus-icon,
+::v-deep .binary-box-icon {
   width: 16px;
   height: 16px;
   fill: currentColor;

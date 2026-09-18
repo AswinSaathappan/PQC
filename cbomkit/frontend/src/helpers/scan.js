@@ -77,8 +77,8 @@ export function stopWebSocket() {
 export function connectAndScan(gitBranch, gitSubfolder, credentials) {
   const urlParams = new URLSearchParams(window.location.search);
   const targetType = urlParams.get('targetType') || (window.__targetType) || '';
-  if (targetType === "folder") {
-    console.log("connectAndScan skipped: in folder mode, using LocalScanner");
+  if (targetType === "folder" || targetType === "binary") {
+    console.log("connectAndScan skipped: in folder or binary mode, using LocalScanner/BinaryScanner");
     return;
   }
   model.resetScanningInfo();
@@ -92,7 +92,7 @@ export function connectAndScan(gitBranch, gitSubfolder, credentials) {
 function scan() {
   const urlParams = new URLSearchParams(window.location.search);
   const targetType = urlParams.get('targetType') || (window.__targetType) || '';
-  if (targetType === "folder") {
+  if (targetType === "folder" || targetType === "binary") {
     return;
   }
   if (!model.scanning.socket) {

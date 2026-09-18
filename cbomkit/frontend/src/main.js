@@ -2,8 +2,12 @@ import Vue from "vue";
 import App from "./App.vue";
 import CarbonComponentsVue from "@carbon/vue/src/index";
 import ChartsVue from "@carbon/charts-vue";
-// eslint-disable-next-line no-unused-vars
 import { model } from "@/model.js";
+import { showResultFromUpload } from "@/helpers";
+
+window.model = model;
+window.cbomModel = model;
+window.showResultFromUpload = showResultFromUpload;
 
 Vue.use(CarbonComponentsVue);
 Vue.use(ChartsVue);

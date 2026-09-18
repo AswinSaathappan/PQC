@@ -192,7 +192,7 @@ export default function CBOM({
 
   useEffect(() => {
     const handleMsg = (e: MessageEvent) => {
-      if (e.data && (e.data.type === 'SCAN_STARTED' || e.data.type === 'FOLDER_SCAN_STARTED')) {
+      if (e.data && (e.data.type === 'SCAN_STARTED' || e.data.type === 'FOLDER_SCAN_STARTED' || e.data.type === 'BINARY_SCAN_STARTED')) {
         setAnalysis((prev: any) => ({ ...prev, status: 'RUNNING' }));
       }
     };
@@ -203,13 +203,13 @@ export default function CBOM({
   const resolvedTargetType = (analysis?.targetType) || (analyses.find(a => a.analysisId === currentAnalysisId)?.targetType) || '';
   const iframeSrc = React.useMemo(() => {
     if (!currentAnalysisId) return '';
-    return `http://localhost:8001/?analysisId=${encodeURIComponent(currentAnalysisId)}&targetType=${encodeURIComponent(resolvedTargetType)}&v=20260916v8`;
+    return `http://localhost:8001/?analysisId=${encodeURIComponent(currentAnalysisId)}&targetType=${encodeURIComponent(resolvedTargetType)}&v=20260918v5`;
   }, [currentAnalysisId, resolvedTargetType]);
 
-  const lastLoadedAnalysisRef = useRef<string>('');
+  const lastLoadedRef = useRef<{ id: string; target: string }>({ id: '', target: '' });
   useEffect(() => {
-    if (currentAnalysisId && currentAnalysisId !== lastLoadedAnalysisRef.current && iframeRef.current?.contentWindow) {
-      lastLoadedAnalysisRef.current = currentAnalysisId;
+    if (currentAnalysisId && (currentAnalysisId !== lastLoadedRef.current.id || resolvedTargetType !== lastLoadedRef.current.target) && iframeRef.current?.contentWindow) {
+      lastLoadedRef.current = { id: currentAnalysisId, target: resolvedTargetType };
       try {
         iframeRef.current.contentWindow.postMessage({
           type: 'LOAD_ANALYSIS',
@@ -219,7 +219,7 @@ export default function CBOM({
         }, '*');
       } catch {}
     }
-  }, [currentAnalysisId, resolvedTargetType]);
+  }, [currentAnalysisId, resolvedTargetType, analysis?.status]);
 
   // State calculations
   const isCompleted = !loading && (analysis?.status === 'COMPLETED' || (assets.length > 0 && analysis?.status !== 'RUNNING' && analysis?.status !== 'FAILED'));

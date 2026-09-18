@@ -47,13 +47,11 @@ function getRemoteComplianceReport(cbom, policyIdentifier = API_CHECK_POLICY_NAM
       } else {
         // An error occured in the backend compliance service, we use the local compliance service instead
         console.warn("Using the local compliance report instead of the remote one")
-        model.addError(ErrorStatus.FallBackLocalComplianceReport)
         getLocalComplianceReport(cbom)
       }
     })
     .catch(() => {
       console.warn("Using the local compliance report instead of the remote one")
-      model.addError(ErrorStatus.FallBackLocalComplianceReport)
       getLocalComplianceReport(cbom)
     });
 }

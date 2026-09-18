@@ -45,7 +45,7 @@ export default function NewAnalysis({ onComplete, onNavigate, onSelectAnalysis, 
 
       const payload = {
         applicationName: appName.trim(),
-        targetType: inputType === "folder" ? "folder" : "source_code",
+        targetType: inputType === "folder" ? "folder" : inputType === "binary" ? "binary" : "source_code",
         businessCriticality: critVal,
         dataSensitivity: sensVal,
         dataProtectionDuration: typeof dataLifetime === "number" ? dataLifetime : 5,

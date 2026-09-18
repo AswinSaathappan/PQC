@@ -1,6 +1,12 @@
 import { model } from "@/model.js";
 
 export function getTitle() {
+  if (typeof window !== "undefined") {
+    const urlParams = new URLSearchParams(window.location.search);
+    if (urlParams.get("targetType") === "binary" || window.__targetType === "binary") {
+      return "CBOM";
+    }
+  }
   return String(process.env.VUE_APP_TITLE || 'CBOM Service');
 }
 

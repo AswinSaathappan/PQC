@@ -1,0 +1,10 @@
+{
+  "description": "This web application allows users to generate tailored content based on prompts, enhancing creativity and productivity for writers and marketers.",
+  "robots": {
+    "index": false
+  },
+  "accessibility": {
+    "addBypassLinks": false,
+    "ignoreReducedMotion": false
+  }
+}

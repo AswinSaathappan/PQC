@@ -217,28 +217,11 @@ export default function Classification({ selectedAnalysisId, onSelectAnalysis, a
       <div className="max-w-[1320px] mx-auto px-6 py-6 space-y-5">
         
         {/* Top bar */}
-        <div className="bg-white border border-[#dde1e9] rounded-lg px-5 py-4 flex items-center justify-between shadow-xs">
+        <div className="bg-white border border-[#dde1e9] rounded-lg px-5 py-4 shadow-xs">
           <div>
             <div className="text-[15px] font-bold text-[#1e3a5f]">Cryptographic Asset Classification</div>
             <div className="text-[12px] text-[#6b7589]">
               Dual-layer classification: Original CBOM compliance results paired with the CRYPTAVISTA Quantum Risk model.
-            </div>
-          </div>
-          <div className="flex items-center gap-3">
-            <span className="text-[11px] font-semibold text-[#6b7589]">Application:</span>
-            <div className="relative">
-              <select
-                value={effectiveAnalysisId || ""}
-                onChange={(e) => onSelectAnalysis?.(e.target.value)}
-                className="appearance-none bg-[#f5f6f8] border border-[#dde1e9] text-[#1a1d23] text-[12px] font-bold py-1.5 pl-3 pr-8 rounded-md outline-none focus:border-[#1e3a5f] cursor-pointer"
-              >
-                {analyses.map(a => (
-                  <option key={a.analysisId} value={a.analysisId}>
-                    {a.applicationName}
-                  </option>
-                ))}
-              </select>
-              <ChevronDown size={14} className="absolute right-2 top-1/2 -translate-y-1/2 text-[#6b7589] pointer-events-none" />
             </div>
           </div>
         </div>

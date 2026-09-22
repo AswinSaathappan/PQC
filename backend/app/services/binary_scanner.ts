@@ -57,7 +57,7 @@ export interface Cbom {
   scannedLines?: number;
 }
 
-interface CryptoSignature {
+export interface CryptoSignature {
   name: string;
   primitive: string;
   assetType?: string;
@@ -71,7 +71,7 @@ interface CryptoSignature {
   patterns: (string | RegExp)[];
 }
 
-const CRYPTO_SIGNATURES: CryptoSignature[] = [
+export const CRYPTO_SIGNATURES: CryptoSignature[] = [
   // ==========================================
   // Post-Quantum Cryptography (Quantum Safe)
   // ==========================================
@@ -700,6 +700,24 @@ export class BinaryScanner {
     }
 
     return cbom;
+  }
+
+  /**
+   * Scans a memory buffer using binary format parsers (ELF/PE/Mach-O) and string extraction.
+   * Useful for static container scanning without touching disk.
+   */
+  public static async scanRawBuffer(
+    buffer: Buffer,
+    recordFinding: (sig: CryptoSignature, offset: number, matchedText: string, sourceType: Finding['sourceType'], section?: string) => Promise<void> | void
+  ): Promise<void> {
+    if (this.isElf(buffer)) {
+      await this.scanElfBinary(buffer, recordFinding);
+    } else if (this.isPe(buffer)) {
+      await this.scanPeBinary(buffer, recordFinding);
+    } else if (this.isMachO(buffer)) {
+      await this.scanMachOBinary(buffer, recordFinding);
+    }
+    await this.scanBinaryStrings(buffer, recordFinding);
   }
 
   // ==========================================

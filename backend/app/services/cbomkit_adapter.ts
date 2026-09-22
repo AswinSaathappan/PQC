@@ -354,7 +354,7 @@ export class CbomkitAdapter {
         detectionContext: occurrences[0]?.additionalContext,
         sourceLocation: primaryLoc,
         parentComponent: linkedAlgoComp
-      });
+      }, isPartial);
 
       // Create an authoritative asset row for each detected occurrence
       if (occurrences.length > 0) {

@@ -377,25 +377,6 @@ export default function RiskTimeline({ selectedAnalysisId, onSelectAnalysis, ana
                 title={`Threat Horizon Year: ${horizonYear} (Z = ${actZ} years)`}
               />
             </div>
-
-            {/* Application Dropdown */}
-            <div className="flex items-center gap-2">
-              <span className="text-[11px] font-semibold text-[#6b7589]">Application:</span>
-              <div className="relative">
-                <select
-                  value={selectedAnalysisId || ""}
-                  onChange={(e) => onSelectAnalysis?.(e.target.value)}
-                  className="appearance-none bg-[#f5f6f8] border border-[#dde1e9] text-[#1a1d23] text-[12px] font-bold py-1.5 pl-3 pr-8 rounded-md outline-none focus:border-[#1e3a5f] cursor-pointer"
-                >
-                  {analyses.map(a => (
-                    <option key={a.analysisId} value={a.analysisId}>
-                      {a.applicationName} ({a.analysisId})
-                    </option>
-                  ))}
-                </select>
-                <ChevronDown size={14} className="absolute right-2 top-1/2 -translate-y-1/2 text-[#6b7589] pointer-events-none" />
-              </div>
-            </div>
           </div>
         </div>
 

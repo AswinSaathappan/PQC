@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useRef, useCallback } from "react";
+import React, { useEffect, useState, useRef, useCallback, useMemo } from "react";
 import { Download, Search, Box, HelpCircle, ShieldCheck, ShieldAlert, ChevronRight, ChevronDown, RefreshCw, AlertTriangle, Loader2, Play, UploadCloud, PlusCircle, FileText, Sun } from "lucide-react";
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
@@ -192,7 +192,7 @@ export default function CBOM({
 
   useEffect(() => {
     const handleMsg = (e: MessageEvent) => {
-      if (e.data && (e.data.type === 'SCAN_STARTED' || e.data.type === 'FOLDER_SCAN_STARTED' || e.data.type === 'BINARY_SCAN_STARTED')) {
+      if (e.data && (e.data.type === 'SCAN_STARTED' || e.data.type === 'FOLDER_SCAN_STARTED' || e.data.type === 'BINARY_SCAN_STARTED' || e.data.type === 'CONTAINER_SCAN_STARTED')) {
         setAnalysis((prev: any) => ({ ...prev, status: 'RUNNING' }));
       }
     };
@@ -291,39 +291,77 @@ export default function CBOM({
     checkCBOMKit();
   }, []);
 
-  // Summary Data Model (Authoritative 5 CBOMKit compliance counts from backend response)
-  const totalCryptoAssets = summaryData?.totalCryptoAssets ?? (analysis?.detectedCryptoAssetCount ?? assets.length);
-  let unknown = summaryData?.unknown ?? 0;
-  let notApplicable = summaryData?.notApplicable ?? 0;
-  let notQuantumSafe = summaryData?.notQuantumSafe ?? 0;
-  let quantumSafe = summaryData?.quantumSafe ?? 0;
-  const complianceStatus = summaryData?.complianceStatus ?? 'completed';
+  // Unified Authoritative CBOM Classification Model (Single Source of Truth)
+  const cbomClassification = useMemo(() => {
+    // 1. Authoritative counts from backend summaryData or analysis.cbomSummary
+    let total = summaryData?.totalCryptoAssets ?? (analysis?.cbomSummary?.totalCryptoAssets ?? (analysis?.detectedCryptoAssetCount ?? assets.length));
+    let unk = summaryData?.unknown ?? (analysis?.cbomSummary?.unknown ?? 0);
+    let na = summaryData?.notApplicable ?? (analysis?.cbomSummary?.notApplicable ?? 0);
+    let nqs = summaryData?.notQuantumSafe ?? (analysis?.cbomSummary?.notQuantumSafe ?? 0);
+    let qs = summaryData?.quantumSafe ?? (analysis?.cbomSummary?.quantumSafe ?? 0);
 
-  // Fallback tally across assets if summaryData not yet returned
-  if (!summaryData && assets.length > 0) {
-    unknown = 0;
-    notApplicable = 0;
-    notQuantumSafe = 0;
-    quantumSafe = 0;
-    assets.forEach(a => {
-      if (a.cbomKitClassification === 'Quantum Safe') {
-        quantumSafe += 1;
-      } else if (a.cbomKitClassification === 'Not Quantum Safe') {
-        notQuantumSafe += 1;
-      } else if (a.cbomKitClassification === 'Not Applicable') {
-        notApplicable += 1;
-      } else {
-        unknown += 1;
-      }
-    });
-  }
+    // 2. Fallback tally from assets list if backend summary is not yet loaded
+    if (!summaryData && !analysis?.cbomSummary && assets.length > 0) {
+      unk = 0;
+      na = 0;
+      nqs = 0;
+      qs = 0;
+      assets.forEach(a => {
+        const c = a.cbomKitClassification || a.cbomkitClassification;
+        if (c === 'Quantum Safe' || c === 'quantum-safe' || c === 'quantum_safe') {
+          qs += 1;
+        } else if (c === 'Not Quantum Safe' || c === 'quantum-vulnerable' || c === 'quantum_vulnerable') {
+          nqs += 1;
+        } else if (c === 'Not Applicable' || c === 'na' || c === 'not-applicable') {
+          na += 1;
+        } else {
+          unk += 1;
+        }
+      });
+      total = assets.length;
+    }
+
+    // 3. Mathematical reconciliation: ensure sum of categories matches total
+    const sum = qs + nqs + na + unk;
+    const isConsistent = total === sum;
+    if (total === 0 && sum > 0) {
+      total = sum;
+    } else if (sum > 0 && total !== sum) {
+      // Reconcile total with exact sum of category occurrences
+      total = sum;
+    }
+
+    // 4. Dynamic percentages derived directly from total occurrences
+    const calcPct = (count: number) => {
+      if (total === 0) return "0.0%";
+      return `${((count / total) * 100).toFixed(1)}%`;
+    };
+
+    const uniqueLogicalAssets = assets.length > 0
+      ? new Set(assets.map(a => a.assetName || a.algorithm || a.assetId)).size
+      : 0;
+
+    return {
+      totalAssets: total,
+      unknown: unk,
+      notApplicable: na,
+      notQuantumSafe: nqs,
+      quantumSafe: qs,
+      unknownPct: calcPct(unk),
+      notApplicablePct: calcPct(na),
+      notQuantumSafePct: calcPct(nqs),
+      quantumSafePct: calcPct(qs),
+      isConsistent,
+      uniqueLogicalAssets
+    };
+  }, [summaryData, analysis, assets]);
 
   const cbomSummary = {
-    totalCryptoAssets,
-    unknown,
-    notApplicable,
-    notQuantumSafe,
-    quantumSafe
+    totalCryptoAssets: cbomClassification.totalAssets,
+    unknown: cbomClassification.unknown,
+    notApplicable: cbomClassification.notApplicable,
+    notQuantumSafe: cbomClassification.notQuantumSafe,
+    quantumSafe: cbomClassification.quantumSafe
   };
 
   // Generate PDF logic
@@ -350,14 +388,14 @@ export default function CBOM({
     doc.setTextColor(30, 58, 95);
     doc.text("Executive Summary", 14, 68);
     
-    // Summary Blocks (Exact CBOM occurrence and unique asset metrics)
+    // Summary Blocks (Exact CBOM occurrence and unique asset metrics with authoritative percentages)
     const summaryTableData = [
-      ["Total Cryptographic Asset Occurrences", cbomSummary.totalCryptoAssets.toString()],
+      ["Total Cryptographic Asset Occurrences", `${cbomClassification.totalAssets} (100%)`],
       ["Unique Logical Cryptographic Assets", (assets.length > 0 ? new Set(assets.map(a => a.assetName || a.algorithm)).size.toString() : "-")],
-      ["Unknown", cbomSummary.unknown.toString()],
-      ["Not Applicable", cbomSummary.notApplicable.toString()],
-      ["Not Quantum Safe", cbomSummary.notQuantumSafe.toString()],
-      ["Quantum Safe", cbomSummary.quantumSafe.toString()]
+      ["Unknown", `${cbomClassification.unknown} (${cbomClassification.unknownPct})`],
+      ["Not Applicable", `${cbomClassification.notApplicable} (${cbomClassification.notApplicablePct})`],
+      ["Not Quantum Safe", `${cbomClassification.notQuantumSafe} (${cbomClassification.notQuantumSafePct})`],
+      ["Quantum Safe", `${cbomClassification.quantumSafe} (${cbomClassification.quantumSafePct})`]
     ];
 
     autoTable(doc, {
@@ -449,8 +487,6 @@ export default function CBOM({
               Cryptography Bill of Materials (CBOM)
             </h1>
             <div className="text-sm text-[#6b7589] mt-1 flex flex-wrap items-center gap-3">
-              <span>Application: <strong className="text-gray-900">{analysis?.applicationName || 'Unknown'}</strong></span>
-              <span className="w-1 h-1 rounded-full bg-gray-300"></span>
               <span className="flex items-center gap-1">
                 Scan Status:{" "}
                 <span className={`font-medium ${
@@ -469,29 +505,10 @@ export default function CBOM({
           </div>
           
           <div className="flex gap-4 items-center">
-            <div className="flex flex-col items-end">
-               <span className="text-[10px] uppercase font-bold text-gray-500 mb-1">Target Application</span>
-                <select 
-                  value={currentAnalysisId} 
-                  onChange={e => handleSelectApp(e.target.value)} 
-                  className="text-[12px] border border-[#dde1e9] rounded-md px-3 py-1.5 bg-gray-50 outline-none text-[#1a1d23] font-medium min-w-[200px]"
-                >
-                  {analyses.length === 0 && <option value="">No applications found</option>}
-                  {analyses.map(a => (
-                    <option key={a.analysisId} value={a.analysisId}>
-                      {a.applicationName}
-                    </option>
-                  ))}
-                </select>
-            </div>
-            
             {isCompleted && (
-              <>
-                <div className="h-10 w-px bg-gray-200 mx-2"></div>
-                <button onClick={handleDownloadPdf} className="px-4 py-2 bg-[#1e3a5f] hover:bg-[#162e4d] text-white rounded-md text-sm font-medium flex items-center gap-2 transition-colors">
-                  <Download size={16} /> Download CBOM PDF
-                </button>
-              </>
+              <button onClick={handleDownloadPdf} className="px-4 py-2 bg-[#1e3a5f] hover:bg-[#162e4d] text-white rounded-md text-sm font-medium flex items-center gap-2 transition-colors">
+                <Download size={16} /> Download CBOM PDF
+              </button>
             )}
           </div>
         </div>
@@ -537,33 +554,66 @@ export default function CBOM({
         )}
 
 
-        {/* Dynamic CBOM Stats: Exactly 5 cards matching user screenshot */}
+        {/* Consistency Notification if reconciliation was required */}
+        {!cbomClassification.isConsistent && (
+          <div className="bg-amber-50 border border-amber-200 text-amber-800 px-4 py-2.5 rounded-lg text-xs flex items-center gap-2">
+            <AlertTriangle size={16} className="text-amber-600 shrink-0" />
+            <span>
+              Authoritative CBOM classification counts were reconciled with discovered inventory occurrences.
+            </span>
+          </div>
+        )}
+
+        {/* Dynamic CBOM Stats: Exactly 5 cards matching authoritative CBOM classification */}
         <div className="grid gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-5">
             {/* CARD 1: Total Cryptographic Asset Occurrences */}
             <div className="bg-white border border-[#dde1e9] rounded-lg p-5 shadow-sm flex flex-col justify-between">
               <div>
-                <div className="flex items-center gap-2 text-blue-600 mb-1">
-                  <Box size={18} />
-                  <div className="text-xs font-semibold uppercase tracking-wider text-[#6b7589]">Total Cryptographic Asset Occurrences</div>
+                <div className="flex items-center justify-between mb-1">
+                  <div className="flex items-center gap-1.5 text-blue-600">
+                    <Box size={18} strokeWidth={2} className="w-[18px] h-[18px] min-w-[18px] min-h-[18px] shrink-0 self-start mt-[1px]" />
+                    <div className="text-xs font-semibold uppercase tracking-wider text-[#6b7589]">Total Cryptographic Asset Occurrences</div>
+                  </div>
+                  <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-blue-50 text-blue-700 border border-blue-200">
+                    100%
+                  </span>
                 </div>
-                <div className="text-3xl font-bold text-[#1a1d23] mt-2">
-                  {loading ? "…" : (!analysis && assets.length === 0) ? "CBOM data unavailable" : cbomSummary.totalCryptoAssets}
+                <div className="mt-2">
+                  <div className="text-3xl font-bold text-[#1a1d23] leading-none">
+                    {loading ? "…" : (!analysis && assets.length === 0) ? "—" : cbomClassification.totalAssets}
+                  </div>
+                  <div className="text-[10px] font-medium text-[#6b7589] mt-1">
+                    Total occurrences
+                  </div>
                 </div>
               </div>
-              <div className="text-[10px] text-[#6b7589] mt-3">
-                {assets.length > 0 ? `${cbomSummary.totalCryptoAssets} occurrences across ${new Set(assets.map(a => a.assetName || a.algorithm)).size} unique logical cryptographic assets` : 'Authoritative CBOM count'}
+
+              <div className="mt-3 pt-2.5 border-t border-[#e2e8f0]">
+                <div className="bg-[#f0f5fc] border border-[#d3e2f5] rounded-md px-3 py-2">
+                  <div className="text-xl font-bold text-[#1e3a5f] leading-none">
+                    {loading ? "…" : (!analysis && assets.length === 0) ? "—" : (cbomClassification.uniqueLogicalAssets || 0)}
+                  </div>
+                  <div className="text-[10px] font-semibold text-[#1e3a5f] mt-1">
+                    Unique Cryptographic Assets
+                  </div>
+                </div>
               </div>
             </div>
 
             {/* CARD 2: Unknown */}
             <div className="bg-white border border-[#dde1e9] rounded-lg p-5 shadow-sm flex flex-col justify-between">
               <div>
-                <div className="flex items-center gap-2 text-gray-500 mb-1">
-                  <HelpCircle size={18} />
-                  <div className="text-xs font-semibold uppercase tracking-wider text-[#6b7589]">Unknown</div>
+                <div className="flex items-center justify-between mb-1">
+                  <div className="flex items-center gap-1.5 text-gray-500">
+                    <HelpCircle size={18} />
+                    <div className="text-xs font-semibold uppercase tracking-wider text-[#6b7589]">Unknown</div>
+                  </div>
+                  <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-gray-50 text-gray-700 border border-gray-200">
+                    {cbomClassification.unknownPct}
+                  </span>
                 </div>
                 <div className="text-3xl font-bold text-[#1a1d23] mt-2">
-                  {loading ? "…" : (!analysis && assets.length === 0) ? "—" : cbomSummary.unknown}
+                  {loading ? "…" : (!analysis && assets.length === 0) ? "—" : cbomClassification.unknown}
                 </div>
               </div>
               <div className="text-[10px] text-[#6b7589] mt-3">
@@ -574,28 +624,38 @@ export default function CBOM({
             {/* CARD 3: Not Applicable */}
             <div className="bg-white border border-[#dde1e9] rounded-lg p-5 shadow-sm flex flex-col justify-between">
               <div>
-                <div className="flex items-center gap-2 text-slate-500 mb-1">
-                  <ShieldCheck size={18} />
-                  <div className="text-xs font-semibold uppercase tracking-wider text-[#6b7589]">Not Applicable</div>
+                <div className="flex items-center justify-between mb-1">
+                  <div className="flex items-center gap-1.5 text-slate-500">
+                    <ShieldCheck size={18} />
+                    <div className="text-xs font-semibold uppercase tracking-wider text-[#6b7589]">Not Applicable</div>
+                  </div>
+                  <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-slate-50 text-slate-700 border border-slate-200">
+                    {cbomClassification.notApplicablePct}
+                  </span>
                 </div>
                 <div className="text-3xl font-bold text-[#1a1d23] mt-2">
-                  {loading ? "…" : (!analysis && assets.length === 0) ? "—" : cbomSummary.notApplicable}
+                  {loading ? "…" : (!analysis && assets.length === 0) ? "—" : cbomClassification.notApplicable}
                 </div>
               </div>
               <div className="text-[10px] text-[#6b7589] mt-3">
-                Symmetric / non-asymmetric
+                Symmetric / non-quantum-applicable assets
               </div>
             </div>
 
             {/* CARD 4: Not Quantum Safe */}
             <div className="bg-white border border-[#dde1e9] rounded-lg p-5 shadow-sm flex flex-col justify-between">
               <div>
-                <div className="flex items-center gap-2 text-red-500 mb-1">
-                  <ShieldAlert size={18} />
-                  <div className="text-xs font-semibold uppercase tracking-wider text-[#6b7589]">Not Quantum Safe</div>
+                <div className="flex items-center justify-between mb-1">
+                  <div className="flex items-center gap-1.5 text-red-500">
+                    <ShieldAlert size={18} />
+                    <div className="text-xs font-semibold uppercase tracking-wider text-[#6b7589]">Not Quantum Safe</div>
+                  </div>
+                  <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-red-50 text-red-700 border border-red-200">
+                    {cbomClassification.notQuantumSafePct}
+                  </span>
                 </div>
                 <div className="text-3xl font-bold text-[#1a1d23] mt-2">
-                  {loading ? "…" : (!analysis && assets.length === 0) ? "—" : cbomSummary.notQuantumSafe}
+                  {loading ? "…" : (!analysis && assets.length === 0) ? "—" : cbomClassification.notQuantumSafe}
                 </div>
               </div>
               <div className="text-[10px] text-[#6b7589] mt-3">
@@ -606,24 +666,21 @@ export default function CBOM({
             {/* CARD 5: Quantum Safe */}
             <div className="bg-white border border-[#dde1e9] rounded-lg p-5 shadow-sm flex flex-col justify-between relative">
               <div>
-                <div className="flex items-center gap-2 text-emerald-600 mb-1">
-                  <ShieldCheck size={18} />
-                  <div className="text-xs font-semibold uppercase tracking-wider text-[#6b7589]">Quantum Safe</div>
+                <div className="flex items-center justify-between mb-1">
+                  <div className="flex items-center gap-1.5 text-emerald-600">
+                    <ShieldCheck size={18} />
+                    <div className="text-xs font-semibold uppercase tracking-wider text-[#6b7589]">Quantum Safe</div>
+                  </div>
+                  <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">
+                    {cbomClassification.quantumSafePct}
+                  </span>
                 </div>
                 <div className="text-3xl font-bold text-[#1a1d23] mt-2">
-                  {loading ? (
-                    "…"
-                  ) : complianceStatus === 'analyzing' ? (
-                    <span className="text-xs font-medium text-blue-600">Analyzing quantum safety...</span>
-                  ) : complianceStatus === 'failed' ? (
-                    <span className="text-xs font-medium text-amber-600">Quantum safety analysis unavailable</span>
-                  ) : (
-                    cbomSummary.quantumSafe
-                  )}
+                  {loading ? "…" : (!analysis && assets.length === 0) ? "—" : cbomClassification.quantumSafe}
                 </div>
               </div>
               <div className="text-[10px] text-[#6b7589] mt-3 font-medium">
-                Source: CBOM compliance analysis
+                Quantum-safe algorithms
               </div>
             </div>
           </div>
@@ -634,7 +691,7 @@ export default function CBOM({
             <div className="flex items-center gap-3">
               <div className="text-sm font-semibold text-[#1a1d23]">Cryptographic Visualization</div>
               <span className="text-xs text-gray-500 font-normal">
-                {assets.length} Cryptographic Asset Occurrences Mapped
+                {cbomClassification.totalAssets} Cryptographic Asset Occurrences Mapped
               </span>
             </div>
             

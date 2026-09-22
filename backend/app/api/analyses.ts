@@ -13,6 +13,7 @@ import { RecommendationAdvisor } from '../services/recommendation_advisor';
 import { TargetService } from '../services/target_service';
 import { LocalScanner } from '../services/local_scanner';
 import { BinaryScanner } from '../services/binary_scanner';
+import { ContainerScanner } from '../services/container_scanner';
 import fs from 'fs';
 import path from 'path';
 
@@ -54,10 +55,9 @@ router.post('/', upload.single('file'), async (req: Request, res: Response): Pro
 
     await analysis.save();
 
-    // Start background processing:
-    // For folder / binary: wait until archive / binary file is uploaded in CBOMKit.
+    // For folder / binary / container: wait until archive / binary / container reference is scanned in CBOMKit.
     // For source_code / Git: start processAnalysis so it waits for CBOMKit scan result when user scans in CBOMKit.
-    if ((resolvedTargetType === 'source_code' && !req.file?.path) || repositoryUrl || (resolvedTargetType === 'folder' && req.file?.path) || (resolvedTargetType === 'binary' && req.file?.path)) {
+    if ((resolvedTargetType === 'source_code' && !req.file?.path) || (resolvedTargetType === 'container' && repositoryUrl) || (resolvedTargetType === 'folder' && req.file?.path) || (resolvedTargetType === 'binary' && req.file?.path)) {
       processAnalysis(analysisId, repositoryUrl, req.file?.path, resolvedTargetType, branch, commit, req.file?.originalname);
     }
 
@@ -78,10 +78,13 @@ router.post('/:id/scan', upload.single('file'), async (req: Request, res: Respon
       return;
     }
 
-    const { repositoryUrl, branch, commit, targetType: reqTargetType } = req.body;
+    const { repositoryUrl, imageReference, branch, commit, targetType: reqTargetType } = req.body;
     const uploadedFilePath = req.file?.path;
     const originalFilename = req.file?.originalname;
-    const resolvedTargetType = reqTargetType || (analysis.targetType === 'binary' ? 'binary' : analysis.targetType === 'folder' ? 'folder' : req.file ? 'folder' : 'source_code');
+    let rawImage = (imageReference && imageReference.trim()) || (repositoryUrl && repositoryUrl.trim()) || '';
+    const matchParen = rawImage.match(/\(([^)]+)\)/);
+    const effectiveImageRef = matchParen ? matchParen[1].trim() : rawImage;
+    const resolvedTargetType = reqTargetType || (analysis.targetType === 'container' ? 'container' : analysis.targetType === 'binary' ? 'binary' : analysis.targetType === 'folder' ? 'folder' : req.file ? 'folder' : 'source_code');
 
     const updateDoc: any = {
       status: 'RUNNING',
@@ -90,8 +93,8 @@ router.post('/:id/scan', upload.single('file'), async (req: Request, res: Respon
       'stages.discover.startedAt': new Date(),
       errorMessage: null
     };
-    if (repositoryUrl) {
-      updateDoc.repositoryUrl = repositoryUrl.trim();
+    if (effectiveImageRef) {
+      updateDoc.repositoryUrl = effectiveImageRef;
     }
     if (branch) {
       updateDoc.gitBranch = branch.trim();
@@ -105,7 +108,7 @@ router.post('/:id/scan', upload.single('file'), async (req: Request, res: Respon
 
     await Analysis.updateOne({ analysisId }, { $set: updateDoc });
 
-    const effectiveRepoUrl = (repositoryUrl && repositoryUrl.trim()) || analysis.repositoryUrl;
+    const effectiveRepoUrl = effectiveImageRef || analysis.repositoryUrl;
     processAnalysis(analysisId, effectiveRepoUrl, uploadedFilePath, resolvedTargetType, branch, commit, originalFilename);
 
     res.json({ success: true, status: 'RUNNING', analysisId });
@@ -1645,6 +1648,39 @@ async function processAnalysis(analysisId: string, repositoryUrl?: string, zipFi
     await Analysis.updateOne({ analysisId }, { $set: initialUpdate });
     await updateDiscoverStage('RUNNING');
 
+    // Initialize initial empty CBOM in MongoDB so GET /api/analyses/:id/cbom is immediately available during RUNNING
+    if (targetType === 'folder' || targetType === 'binary' || targetType === 'container') {
+      const existingCbom = await Cbom.findOne({ analysisId });
+      if (!existingCbom) {
+        const initialCbom = {
+          bomFormat: "CycloneDX",
+          specVersion: "1.6",
+          serialNumber: "urn:uuid:" + uuidv4(),
+          version: 1,
+          metadata: {
+            timestamp: new Date().toISOString(),
+            tools: {
+              services: [{ name: "CRYPTAVISTA Scanner", provider: { name: "CRYPTAVISTA" } }]
+            },
+            component: {
+              name: (targetType === 'container' ? repositoryUrl : 'project') || 'project',
+              type: "application",
+              "bom-ref": `application@${analysisId}`
+            }
+          },
+          components: [],
+          dependencies: [],
+          scannedFiles: 0,
+          scannedLines: 0
+        };
+        await Cbom.updateOne(
+          { analysisId },
+          { $set: { cbomId: uuidv4(), rawJson: initialCbom } },
+          { upsert: true }
+        );
+      }
+    }
+
     let assetCount = 0;
 
     if (targetType === 'folder') {
@@ -1659,10 +1695,12 @@ async function processAnalysis(analysisId: string, repositoryUrl?: string, zipFi
 
       // 2. Discover cryptographic assets using LocalScanner
       let lastProgressSync = 0;
+      let lastAssetCount = 0;
       const cbomJson = await LocalScanner.scanDirectory(targetDir, async (partialCbom, info) => {
         const now = Date.now();
-        if (now - lastProgressSync > 250 || info.scannedFiles === info.totalFiles) {
+        if (lastProgressSync === 0 || now - lastProgressSync >= 150 || info.assetCount > lastAssetCount) {
           lastProgressSync = now;
+          lastAssetCount = info.assetCount;
           try {
             await Analysis.updateOne({ analysisId }, {
               $set: {
@@ -1738,6 +1776,70 @@ async function processAnalysis(analysisId: string, repositoryUrl?: string, zipFi
       // 3. Process official CBOM (compliance check + quantum risk classification + MongoDB storage)
       assetCount = await CbomkitAdapter.processOfficialCbom(analysisId, cbomJson, false);
       console.log(`[Discovery: ${analysisId}] Processed and stored ${assetCount} cryptographic asset occurrences`);
+    } else if (targetType === 'container') {
+      const rawTarget = (repositoryUrl && repositoryUrl.trim()) || '';
+      const matchParen = rawTarget.match(/\(([^)]+)\)/);
+      const imageReference = matchParen ? matchParen[1].trim() : rawTarget;
+      console.log(`[Discovery: ${analysisId}] Processing Container Image target: "${imageReference}"`);
+      if (!imageReference) {
+        throw new Error('Container image reference missing from scan request.');
+      }
+
+      // 1. Safely export container rootfs tarball using stopped temporary container
+      const rootfsTarPath = await TargetService.prepareContainerTarget(analysisId, imageReference);
+      console.log(`[Discovery: ${analysisId}] Safely exported container rootfs tarball to ${rootfsTarPath}`);
+
+      // 2. Discover cryptographic assets using ContainerScanner (Safe static tar inspection)
+      let lastAssetCount = 0;
+      let lastProgressSync = 0;
+      let cbomJson: any;
+
+      try {
+        cbomJson = await ContainerScanner.scanContainer(rootfsTarPath, imageReference, async (partialCbom, info) => {
+          const now = Date.now();
+          if (lastProgressSync === 0 || now - lastProgressSync >= 150 || info.assetCount > lastAssetCount) {
+            lastProgressSync = now;
+            lastAssetCount = info.assetCount;
+            try {
+              await Analysis.updateOne({ analysisId }, {
+                $set: {
+                  scannedFiles: info.scannedFiles,
+                  scannedLines: partialCbom.scannedLines ?? 0,
+                  detectedCryptoAssetCount: info.assetCount,
+                  'stages.discover.assetCount': info.assetCount
+                }
+              });
+
+              await CbomkitAdapter.processOfficialCbom(analysisId, partialCbom, true);
+            } catch (progressErr) {
+              console.warn(`[Discovery: ${analysisId}] Container progress update note:`, (progressErr as Error).message);
+            }
+          }
+        });
+      } finally {
+        // Clean up temporary rootfs.tar safely
+        try {
+          if (fs.existsSync(rootfsTarPath)) {
+            fs.unlinkSync(rootfsTarPath);
+            console.log(`[Discovery: ${analysisId}] Cleaned up temporary rootfs tarball`);
+          }
+        } catch (cleanupErr) {
+          console.warn(`[Discovery: ${analysisId}] Cleanup warning for ${rootfsTarPath}:`, cleanupErr);
+        }
+      }
+
+      console.log(`[Discovery: ${analysisId}] ContainerScanner generated CycloneDX CBOM with ${cbomJson.components?.length || 0} components`);
+
+      await Analysis.updateOne({ analysisId }, {
+        $set: {
+          scannedFiles: cbomJson.scannedFiles ?? 1,
+          scannedLines: cbomJson.scannedLines ?? 0
+        }
+      });
+
+      // 3. Process official CBOM (compliance check + quantum risk classification + MongoDB storage)
+      assetCount = await CbomkitAdapter.processOfficialCbom(analysisId, cbomJson, false);
+      console.log(`[Discovery: ${analysisId}] Processed and stored ${assetCount} cryptographic asset occurrences for container ${imageReference}`);
     } else {
       // Existing Source Repository flow: Trigger and Poll CBOMKit (teammate's working implementation)
       const scanStartTime = Date.now();

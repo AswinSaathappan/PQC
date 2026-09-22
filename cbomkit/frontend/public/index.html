@@ -48,6 +48,46 @@
             vertical-align: middle !important;
             pointer-events: none !important;
           }
+
+          /* 1. Remove yellow "Not compliant" banner and any compliance notification banner */
+          .bx--inline-notification,
+          .cds--inline-notification,
+          .bx--inline-notification--warning,
+          .cds--inline-notification--warning,
+          .bx--inline-notification--error,
+          .cds--inline-notification--error,
+          .bx--inline-notification--info,
+          .cds--inline-notification--info,
+          cv-inline-notification,
+          .skeleton-bordered:has(h6) {
+            display: none !important;
+            visibility: hidden !important;
+            height: 0 !important;
+            max-height: 0 !important;
+            margin: 0 !important;
+            padding: 0 !important;
+            border: none !important;
+            overflow: hidden !important;
+            pointer-events: none !important;
+          }
+
+          /* 2. Remove red "Invalid CBOM" alert and toast notifications */
+          .bx--toast-notification[title*="Invalid CBOM"],
+          .cds--toast-notification[title*="Invalid CBOM"],
+          .bx--toast-notification:has([title*="Invalid CBOM"]),
+          .cds--toast-notification:has([title*="Invalid CBOM"]),
+          .notificationContainer:has([title*="Invalid CBOM"]),
+          .bx--toast-notification:has(.bx--toast-notification__title:empty),
+          .cds--toast-notification:has(.cds--toast-notification__title:empty) {
+            display: none !important;
+            visibility: hidden !important;
+            height: 0 !important;
+            max-height: 0 !important;
+            margin: 0 !important;
+            padding: 0 !important;
+            overflow: hidden !important;
+            pointer-events: none !important;
+          }
         </style>
   </head>
   <body>

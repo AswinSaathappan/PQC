@@ -737,6 +737,55 @@ export class LocalScanner {
     };
 
     let totalLines = 0;
+    let lastEmittedCount = 0;
+    let lastEmittedTime = 0;
+
+    const emitProgress = async (fileIdx: number, force = false) => {
+      if (!onProgress) return;
+      const totalOccurrences = components.reduce((acc, c) => acc + (c.evidence?.occurrences?.length || 1), 0);
+      const now = Date.now();
+      const isFirstFinding = (lastEmittedCount === 0 && totalOccurrences > 0);
+      const hasNewFindings = (totalOccurrences > lastEmittedCount);
+      const timeElapsed = now - lastEmittedTime;
+
+      // 1. First real crypto finding: emit immediately so graph appears right away!
+      // 2. Incremental real findings: emit when new findings arrived and at least ~200ms elapsed
+      // 3. Force: emit at end of a phase or file batch if forced
+      if (isFirstFinding || (hasNewFindings && (force || timeElapsed >= 200))) {
+        lastEmittedCount = totalOccurrences;
+        lastEmittedTime = now;
+        const partialCbom: Cbom = {
+          bomFormat: "CycloneDX",
+          specVersion: "1.6",
+          serialNumber: "urn:uuid:" + randomUUID(),
+          version: 1,
+          metadata: {
+            timestamp: new Date().toISOString(),
+            tools: {
+              services: [
+                {
+                  name: "LocalScanner (ECDAT)",
+                  provider: { name: "CRYPTAVISTA" }
+                }
+              ]
+            }
+          },
+          components: [...components],
+          dependencies: [...dependencies],
+          scannedFiles: fileIdx + 1,
+          scannedLines: totalLines
+        };
+        await onProgress(partialCbom, {
+          scannedFiles: fileIdx + 1,
+          totalFiles: files.length,
+          lines: totalLines,
+          assetCount: totalOccurrences
+        });
+        // Pacing yield: allows Express server to process incoming /cbom and /status requests
+        // and gives the user's browser the 250ms polling window to render the growing graph
+        await new Promise(resolve => setTimeout(resolve, 200));
+      }
+    };
 
     for (let fileIdx = 0; fileIdx < files.length; fileIdx++) {
       const file = files[fileIdx];
@@ -1139,37 +1188,10 @@ export class LocalScanner {
         console.warn(`[LocalScanner] Could not read ${file}:`, (fileReadErr as Error).message);
       }
 
-      if (onProgress && components.length > 0) {
-        const partialCbom: Cbom = {
-          bomFormat: "CycloneDX",
-          specVersion: "1.6",
-          serialNumber: "urn:uuid:" + randomUUID(),
-          version: 1,
-          metadata: {
-            timestamp: new Date().toISOString(),
-            tools: {
-              services: [
-                {
-                  name: "LocalScanner (ECDAT)",
-                  provider: { name: "CRYPTAVISTA" }
-                }
-              ]
-            }
-          },
-          components: [...components],
-          dependencies: [...dependencies],
-          scannedFiles: fileIdx + 1,
-          scannedLines: totalLines
-        };
-        const totalOccurrences = components.reduce((acc, c) => acc + (c.evidence?.occurrences?.length || 1), 0);
-        await onProgress(partialCbom, {
-          scannedFiles: fileIdx + 1,
-          totalFiles: files.length,
-          lines: totalLines,
-          assetCount: totalOccurrences
-        });
-      }
+      await emitProgress(fileIdx);
     }
+
+    await emitProgress(Math.max(0, files.length - 1), true);
 
     return {
       bomFormat: "CycloneDX",

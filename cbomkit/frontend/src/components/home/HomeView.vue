@@ -3,7 +3,7 @@
     <div class="heading-outer">
       <div class="heading-inner">
         <h1 style="font-weight: 400; padding-bottom: 6px">
-          {{ isBinaryTarget ? 'CBOM' : getTitle }}
+          {{ getTitle }}
         </h1>
         <h4>
           Explore the use of cryptography in software with

@@ -126,7 +126,7 @@ export default function DependencyGraph({ selectedAnalysisId, analyses = [], onS
             label: "data(displayLabel)",
             "font-size": "10px",
             "font-family": "Inter, system-ui, -apple-system, sans-serif",
-            "font-weight": "600",
+            "font-weight": 600,
             "text-valign": "center",
             "text-halign": "center",
             color: "#1e293b",
@@ -171,7 +171,7 @@ export default function DependencyGraph({ selectedAnalysisId, analyses = [], onS
           selector: ".dimmed",
           style: { opacity: 0.25 },
         },
-      ],
+      ] as any,
       layout: {
         name: "cose",
         padding: 50,
@@ -278,7 +278,7 @@ export default function DependencyGraph({ selectedAnalysisId, analyses = [], onS
       <div className="max-w-[1500px] mx-auto px-6 py-6 space-y-4">
 
         {/* Clean Header */}
-        <div className="bg-white border border-[#dde1e9] rounded-lg px-6 py-4 flex flex-wrap items-center justify-between gap-4 shadow-sm">
+        <div className="bg-white border border-[#dde1e9] rounded-lg px-6 py-4 shadow-sm">
           <div>
             <h1 className="text-xl font-bold text-[#1a1d23]">
               Cryptographic Dependency Network
@@ -289,22 +289,6 @@ export default function DependencyGraph({ selectedAnalysisId, analyses = [], onS
             <div className="mt-2 text-xs font-semibold text-[#1e3a5f]">
               Total Cryptographic Asset Occurrences: {cbomOccurrencesCount} • {uniqueAssetsCount} asset nodes • {totalEdges} verified dependency relationships
             </div>
-          </div>
-
-          <div className="flex items-center gap-3">
-            <span className="text-xs text-[#6b7589] font-medium uppercase tracking-wider">Application:</span>
-            <select
-              value={effectiveAnalysisId || ""}
-              onChange={(e) => onSelectAnalysis && onSelectAnalysis(e.target.value)}
-              className="text-xs border border-[#dde1e9] rounded-md px-3 py-2 bg-[#f8fafc] text-[#1a1d23] font-semibold min-w-[220px] outline-none focus:border-[#1e3a5f] cursor-pointer"
-            >
-              {analyses.length === 0 && <option value="">No applications found</option>}
-              {analyses.map((a) => (
-                <option key={a.analysisId} value={a.analysisId}>
-                  {a.applicationName}
-                </option>
-              ))}
-            </select>
           </div>
         </div>
 

@@ -13,39 +13,8 @@
       v-bind:style="{ borderColor: skeletonColor }"
     />
 
-    <!-- Skeleton inline notification -->
-    <div
-      class="skeleton-bordered"
-      v-else-if="isLoadingCompliance"
-      v-bind:style="{ borderColor: skeletonColor }"
-    >
-      <InProgress16
-        style="margin: 0px 16px 0px 6px"
-        v-bind:style="{ color: skeletonColor }"
-      />
-      <h6 style="padding: 7px 12px 7px 0px">Analyzing compliance...</h6>
-      <cv-skeleton-text
-        v-if="true"
-        :heading="false"
-        :paragraph="false"
-        :line-count="1"
-        style="margin-bottom: -8px; width: 60%"
-      >
-      </cv-skeleton-text>
-    </div>
-
-    <!-- Inline notification -->
-    <cv-inline-notification
-      v-else
-      :kind="this.kind"
-      :title="this.title"
-      :sub-title="this.description"
-      :low-contrast="true"
-      :hide-close-button="true"
-      style="margin: 0px"
-      v-bind:style="{ background: backgroundColor }"
-    >
-    </cv-inline-notification>
+    <!-- Skeleton inline notification removed per UI requirement -->
+    <!-- Inline notification removed per UI requirement -->
   </div>
 </template>
 

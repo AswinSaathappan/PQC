@@ -2,7 +2,7 @@
   <div>
     <div v-for="(error, rowIndex) in model.errors" :key="rowIndex">
       <div
-        v-if="error.status !== 'FallBackLocalComplianceReport' && error.status !== ErrorStatus.FallBackLocalComplianceReport"
+        v-if="error.status !== 'FallBackLocalComplianceReport' && error.status !== ErrorStatus.FallBackLocalComplianceReport && error.status !== 'InvalidCbom' && error.status !== ErrorStatus.InvalidCbom"
         class="notificationContainer"
       >
         <cv-toast-notification

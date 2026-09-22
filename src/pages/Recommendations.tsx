@@ -358,29 +358,6 @@ export default function Recommendations({ selectedAnalysisId: propSelectedId, an
             </div>
 
             <div className="flex flex-wrap items-center gap-3">
-              {/* Application Selector */}
-              {analysesList.length > 1 ? (
-                <div className="flex items-center gap-2 bg-[#f8fafc] border border-[#dde1e9] rounded-md px-3 py-1.5">
-                  <span className="text-[11px] font-semibold text-[#6b7589] uppercase tracking-wider">Application:</span>
-                  <select
-                    value={selectedAnalysisId}
-                    onChange={(e) => handleSelectApp(e.target.value)}
-                    className="text-xs bg-transparent text-[#1e3a5f] font-bold outline-none cursor-pointer"
-                  >
-                    {analysesList.map(app => (
-                      <option key={app.analysisId} value={app.analysisId}>
-                        {app.applicationName} ({app.analysisId})
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              ) : activeApp ? (
-                <div className="bg-[#f8fafc] border border-[#dde1e9] rounded-md px-3 py-1.5 text-xs text-[#1e3a5f] font-bold">
-                  <span className="text-[11px] font-semibold text-[#6b7589] uppercase tracking-wider mr-1.5">Application:</span>
-                  {activeApp.applicationName} ({activeApp.analysisId})
-                </div>
-              ) : null}
-
               {/* AI Engine Status Badge */}
               <div className="flex items-center gap-2 bg-[#f8fafc] border border-[#dde1e9] rounded-md px-3 py-1.5">
                 <Cpu size={14} className="text-[#1e3a5f]" />
@@ -464,25 +441,9 @@ export default function Recommendations({ selectedAnalysisId: propSelectedId, an
                 <h3 className="text-base font-bold text-[#1a1d23] mb-2">
                   Cryptographic Analysis in Progress
                 </h3>
-                <p className="text-xs text-[#6b7589] mb-6 leading-relaxed">
+                <p className="text-xs text-[#6b7589] leading-relaxed">
                   Analysis for <span className="font-semibold text-gray-800">{appName}</span> is currently running. Discovery, CBOM generation, and cryptographic classification are underway. Recommendations will appear here automatically once complete.
                 </p>
-                {analysesList.length > 1 && (
-                  <div className="inline-flex items-center gap-2 bg-[#f8fafc] border border-[#dde1e9] rounded-md px-3 py-1.5 text-xs text-[#1e3a5f]">
-                    <span className="text-[11px] font-semibold text-[#6b7589]">Switch Application:</span>
-                    <select
-                      value={selectedAnalysisId}
-                      onChange={(e) => handleSelectApp(e.target.value)}
-                      className="bg-transparent font-bold outline-none cursor-pointer text-[#1e3a5f]"
-                    >
-                      {analysesList.map(app => (
-                        <option key={app.analysisId} value={app.analysisId}>
-                          {app.applicationName} ({app.analysisId})
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                )}
               </div>
             );
           }
@@ -501,24 +462,8 @@ export default function Recommendations({ selectedAnalysisId: propSelectedId, an
                   The cryptographic analysis for <span className="font-semibold text-gray-800">{appName}</span> failed during discovery or processing.
                 </p>
                 {errorMsg && (
-                  <div className="p-3 bg-red-50 border border-red-200 rounded text-xs text-red-700 font-mono mb-6 text-left break-all">
+                  <div className="p-3 bg-red-50 border border-red-200 rounded text-xs text-red-700 font-mono text-left break-all">
                     {errorMsg}
-                  </div>
-                )}
-                {analysesList.length > 1 && (
-                  <div className="inline-flex items-center gap-2 bg-[#f8fafc] border border-[#dde1e9] rounded-md px-3 py-1.5 text-xs text-[#1e3a5f]">
-                    <span className="text-[11px] font-semibold text-[#6b7589]">Switch Application:</span>
-                    <select
-                      value={selectedAnalysisId}
-                      onChange={(e) => handleSelectApp(e.target.value)}
-                      className="bg-transparent font-bold outline-none cursor-pointer text-[#1e3a5f]"
-                    >
-                      {analysesList.map(app => (
-                        <option key={app.analysisId} value={app.analysisId}>
-                          {app.applicationName} ({app.analysisId})
-                        </option>
-                      ))}
-                    </select>
                   </div>
                 )}
               </div>
@@ -534,25 +479,9 @@ export default function Recommendations({ selectedAnalysisId: propSelectedId, an
               <h3 className="text-base font-bold text-[#1a1d23] mb-2">
                 No Cryptographic Assets Detected
               </h3>
-              <p className="text-xs text-[#6b7589] mb-6 leading-relaxed">
+              <p className="text-xs text-[#6b7589] leading-relaxed">
                 Analysis for <span className="font-semibold text-gray-800">{appName}</span> completed successfully, but zero cryptographic algorithms, primitives, or keys were detected in the source code. No migration action is required.
               </p>
-              {analysesList.length > 1 && (
-                <div className="inline-flex items-center gap-2 bg-[#f8fafc] border border-[#dde1e9] rounded-md px-3 py-1.5 text-xs text-[#1e3a5f]">
-                  <span className="text-[11px] font-semibold text-[#6b7589]">Switch Application:</span>
-                  <select
-                    value={selectedAnalysisId}
-                    onChange={(e) => handleSelectApp(e.target.value)}
-                    className="bg-transparent font-bold outline-none cursor-pointer text-[#1e3a5f]"
-                  >
-                    {analysesList.map(app => (
-                      <option key={app.analysisId} value={app.analysisId}>
-                        {app.applicationName} ({app.analysisId})
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              )}
             </div>
           );
         })() : (
@@ -602,7 +531,7 @@ export default function Recommendations({ selectedAnalysisId: propSelectedId, an
                   <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-semibold bg-amber-50 text-amber-700 border border-amber-200">
                     Phase 2: {phases.phase2.length}
                   </span>
-                  <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-semibold bg-slate-50 text-slate-700 border border-slate-200">
+                  <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200">
                     Phase 3: {phases.phase3.length}
                   </span>
                 </div>
@@ -704,16 +633,16 @@ export default function Recommendations({ selectedAnalysisId: propSelectedId, an
                 </div>
 
                 {/* Phase 3 */}
-                <div className="border border-slate-200 bg-slate-50/60 rounded-lg p-4">
+                <div className="border border-emerald-200 bg-emerald-50/40 rounded-lg p-4">
                   <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
                     <div className="flex items-center gap-2">
-                      <span className="w-2.5 h-2.5 rounded-full bg-slate-500"></span>
-                      <h3 className="font-bold text-slate-800 text-sm">Phase 3 — Low Priority / Monitor</h3>
-                      <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-700 bg-slate-200 px-2 py-0.5 rounded">
+                      <span className="w-2.5 h-2.5 rounded-full bg-emerald-600"></span>
+                      <h3 className="font-bold text-emerald-950 text-sm">Phase 3 — Low Priority / Monitor</h3>
+                      <span className="text-[10px] font-semibold uppercase tracking-wider text-emerald-800 bg-emerald-100 border border-emerald-200 px-2 py-0.5 rounded">
                         Priority: Low
                       </span>
                     </div>
-                    <span className="text-xs text-slate-600 font-medium">
+                    <span className="text-xs text-emerald-800/90 font-medium">
                       Cryptographic components that currently do not require urgent action ({phases.phase3.length})
                     </span>
                   </div>
@@ -725,25 +654,25 @@ export default function Recommendations({ selectedAnalysisId: propSelectedId, an
                         onClick={() => {
                           setExpandedRows(prev => new Set(prev).add(item.assetName));
                         }}
-                        className="bg-white border border-slate-200 rounded-md p-3 text-xs flex flex-col md:flex-row md:items-center justify-between gap-3 hover:border-slate-300 transition-colors cursor-pointer shadow-2xs"
+                        className="bg-white border border-emerald-100 rounded-md p-3 text-xs flex flex-col md:flex-row md:items-center justify-between gap-3 hover:border-emerald-300 transition-colors cursor-pointer shadow-2xs"
                       >
                         <div className="flex items-center gap-2.5 min-w-[200px]">
-                          <span className="font-bold text-slate-800">{item.assetName}</span>
+                          <span className="font-bold text-emerald-950">{item.assetName}</span>
                           <span className="text-[11px] text-gray-500 capitalize">({item.assetType?.replace(/-/g, ' ') || 'Component'})</span>
                         </div>
                         <div className="flex items-center gap-2 min-w-[120px]">
-                          <span className="px-2 py-0.5 bg-slate-100 text-slate-700 font-semibold rounded text-[11px] border border-slate-200">
+                          <span className="px-2 py-0.5 bg-emerald-50 text-emerald-800 font-semibold rounded text-[11px] border border-emerald-200">
                             CPS: {item.priorityScore ?? '—'} ({item.priorityClassification})
                           </span>
                         </div>
                         <div className="flex-1 text-[#1e3a5f] font-medium flex items-center gap-1.5 truncate">
-                          <ArrowRight size={13} className="shrink-0 text-slate-500" />
+                          <ArrowRight size={13} className="shrink-0 text-emerald-600" />
                           <span className="truncate">Target: {item.authoritativeRecommendation?.replacement || item.authoritativeRecommendation?.recommendation}</span>
                         </div>
                       </div>
                     ))}
                     {phases.phase3.length === 0 && (
-                      <div className="text-xs text-gray-500 italic p-2.5 bg-white/60 rounded border border-dashed border-slate-200">
+                      <div className="text-xs text-gray-500 italic p-2.5 bg-white/60 rounded border border-dashed border-emerald-200">
                         No components currently classified as Low priority.
                       </div>
                     )}

@@ -314,7 +314,8 @@ export class CryptavistaClassifier {
    */
   public static async classifyAsset(
     originalCbomkitResult: string | undefined, // 'quantum-safe' | 'quantum-vulnerable' | 'na' | 'unknown'
-    ctx: AssetResolutionContext
+    ctx: AssetResolutionContext,
+    skipAi: boolean = false
   ): Promise<CryptavistaClassificationResult> {
     const rawResult = (originalCbomkitResult || 'unknown').toLowerCase().trim();
     const evidenceList: string[] = [];
@@ -566,29 +567,31 @@ export class CryptavistaClassifier {
     // -------------------------------------------------------------
     // RULE SET 5: AI Fallback for Unresolved Unknowns (Section 8)
     // -------------------------------------------------------------
-    try {
-      const aiEvidence: AssetClassificationEvidence = {
-        algorithmName: ctx.algorithmName || ctx.componentName,
-        primitive: ctx.primitive,
-        assetType: ctx.assetType,
-        cryptoProperties: ctx.cryptoProperties,
-        oid: ctx.oid,
-        associatedAlgorithm: ctx.associatedAlgorithm,
-        relatedCryptoMaterial: ctx.relatedCryptoMaterial,
-        detectionContext: ctx.detectionContext,
-        sourceLocation: ctx.sourceLocation
-      };
+    if (!skipAi) {
+      try {
+        const aiEvidence: AssetClassificationEvidence = {
+          algorithmName: ctx.algorithmName || ctx.componentName,
+          primitive: ctx.primitive,
+          assetType: ctx.assetType,
+          cryptoProperties: ctx.cryptoProperties,
+          oid: ctx.oid,
+          associatedAlgorithm: ctx.associatedAlgorithm,
+          relatedCryptoMaterial: ctx.relatedCryptoMaterial,
+          detectionContext: ctx.detectionContext,
+          sourceLocation: ctx.sourceLocation
+        };
 
-      const aiRes = await RecommendationAdvisor.classifyUnknownAssetWithAi(aiEvidence);
-      return {
-        cryptavistaQuantumRisk: aiRes.quantumRisk,
-        cryptavistaQuantumClassification: aiRes.quantumClassification,
-        cryptavistaScore: aiRes.score,
-        cryptavistaReason: aiRes.reason,
-        cryptavistaEvidence: aiRes.evidence && aiRes.evidence.length > 0 ? aiRes.evidence : ['AI fallback evaluation']
-      };
-    } catch (err) {
-      console.warn('[CryptavistaClassifier] AI classification fallback failed:', err);
+        const aiRes = await RecommendationAdvisor.classifyUnknownAssetWithAi(aiEvidence);
+        return {
+          cryptavistaQuantumRisk: aiRes.quantumRisk,
+          cryptavistaQuantumClassification: aiRes.quantumClassification,
+          cryptavistaScore: aiRes.score,
+          cryptavistaReason: aiRes.reason,
+          cryptavistaEvidence: aiRes.evidence && aiRes.evidence.length > 0 ? aiRes.evidence : ['AI fallback evaluation']
+        };
+      } catch (err) {
+        console.warn('[CryptavistaClassifier] AI classification fallback failed:', err);
+      }
     }
 
     // Default Unknown if all deterministic and AI steps yield no conclusive result

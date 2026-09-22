@@ -126,34 +126,6 @@ export default function Discovery({ selectedAnalysisId: propSelectedId, analyses
   return (
     <div className="flex-1 overflow-y-auto bg-[#f5f6f8]">
       <div className="max-w-[1320px] mx-auto px-6 py-6 space-y-4">
-
-        {/* Header */}
-        <div className="bg-white border border-[#dde1e9] rounded-lg px-5 py-4 flex items-center justify-between">
-          <div>
-            <div className="text-[15px] font-bold text-[#1a1d23]">Cryptographic Asset Discovery</div>
-            <div className="text-[12px] text-[#6b7589] mt-0.5">
-              Discovered cryptographic asset occurrences — sourced directly from scanner results
-            </div>
-          </div>
-          <div className="flex items-center gap-3">
-            <span className="text-[12px] text-gray-600 font-medium">Application:</span>
-            <select
-              value={activeSelectedId}
-              onChange={e => {
-                const val = e.target.value;
-                setLocalSelectedId(val);
-                if (onSelectAnalysis) onSelectAnalysis(val);
-              }}
-              className="text-[12px] border border-[#dde1e9] rounded-md px-3 py-1.5 bg-white outline-none text-[#1a1d23] font-medium min-w-[220px]"
-            >
-              {analysesList.length === 0 && <option value="">No applications found</option>}
-              {analysesList.map(a => (
-                <option key={a.analysisId} value={a.analysisId}>{a.applicationName}</option>
-              ))}
-            </select>
-          </div>
-        </div>
-
         {/* Table Card */}
         <div className="bg-white border border-[#dde1e9] rounded-lg overflow-hidden">
           {/* Table toolbar */}

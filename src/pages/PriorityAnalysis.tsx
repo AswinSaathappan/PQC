@@ -179,32 +179,13 @@ export default function PriorityAnalysis({ selectedAnalysisId, onSelectAnalysis,
     <div className="flex-1 overflow-y-auto bg-[#f5f6f8]">
       <div className="max-w-[1320px] mx-auto px-6 py-6 space-y-5">
 
-        {/* 1. Clean Header with Application Selector */}
-        <div className="bg-white border border-[#dde1e9] rounded-lg px-6 py-4 flex flex-wrap items-center justify-between gap-4 shadow-sm">
+        {/* 1. Clean Header */}
+        <div className="bg-white border border-[#dde1e9] rounded-lg px-6 py-4 shadow-sm">
           <div>
             <h1 className="text-xl font-bold text-[#1e3a5f]">Priority Analysis</h1>
             <p className="text-sm text-[#6b7589] mt-0.5">
               Enterprise cryptographic migration priority based on Mosca timing urgency and component risk.
             </p>
-          </div>
-
-          <div className="flex items-center gap-3">
-            <span className="text-xs text-[#6b7589] font-medium uppercase tracking-wider">Application:</span>
-            <div className="relative">
-              <select
-                value={effectiveAnalysisId || ""}
-                onChange={(e) => onSelectAnalysis && onSelectAnalysis(e.target.value)}
-                className="appearance-none bg-[#f8fafc] border border-[#dde1e9] text-[#1a1d23] text-xs font-semibold py-2 pl-3 pr-8 rounded-md outline-none focus:border-[#1e3a5f] cursor-pointer min-w-[200px]"
-              >
-                {analyses.length === 0 && <option value="">No applications found</option>}
-                {analyses.map(a => (
-                  <option key={a.analysisId} value={a.analysisId}>
-                    {a.applicationName}
-                  </option>
-                ))}
-              </select>
-              <ChevronDown size={14} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[#6b7589] pointer-events-none" />
-            </div>
           </div>
         </div>
 
@@ -290,7 +271,7 @@ export default function PriorityAnalysis({ selectedAnalysisId, onSelectAnalysis,
               <div className="text-xs text-[#6b7589]">Loading component priority data…</div>
             </div>
           ) : assets.length === 0 ? (() => {
-            const appStatus = currentApp?.status || (fallbackApp as any)?.status;
+            const appStatus = (currentApp as any)?.status || (fallbackApp as any)?.status;
             const appError = (currentApp as any)?.errorMessage || (fallbackApp as any)?.errorMessage;
 
             if (appStatus === 'FAILED') {

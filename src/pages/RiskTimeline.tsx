@@ -36,23 +36,23 @@ function getFinalPriority(aps: number) {
 
 function AppPriorityRow({ app, horizon }: { app: any; horizon: number }) {
   const [expanded, setExpanded] = useState(false);
-  
+
   const X = typeof app.dataProtectionDuration === 'number' ? app.dataProtectionDuration : 5;
-  const Y = typeof app.migrationDuration === 'number' ? app.migrationDuration : 2; 
+  const Y = typeof app.migrationDuration === 'number' ? app.migrationDuration : 2;
   const Z = horizon;
-  
+
   const timingMargin = Z - (X + Y);
   const mosca = getMoscaUrgency(timingMargin);
-  
+
   const ds = app.dataSensitivityScore || 25;
   const bc = app.businessCriticalityScore || 25;
-  
+
   const aps = (mosca.score + ds + bc) / 3;
   const priorityText = getFinalPriority(aps);
-  
+
   return (
     <>
-      <tr 
+      <tr
         className={`border-b border-[#f0f2f5] hover:bg-[#f9fafb] cursor-pointer transition-colors ${expanded ? 'bg-[#f9fafb]' : ''}`}
         onClick={() => setExpanded(!expanded)}
       >
@@ -85,7 +85,7 @@ function AppPriorityRow({ app, horizon }: { app: any; horizon: number }) {
           </div>
         </td>
       </tr>
-      
+
       {expanded && (
         <tr className="bg-[#fcfcfc] border-b border-[#f0f2f5]">
           <td colSpan={6} className="p-0">
@@ -97,7 +97,7 @@ function AppPriorityRow({ app, horizon }: { app: any; horizon: number }) {
                     <Calculator size={14} className="text-[#1e3a5f]" />
                     <div className="text-[13px] font-bold text-[#1e3a5f]">Application Priority Score Calculation</div>
                   </div>
-                  
+
                   <div className="space-y-2 bg-white p-4 border border-[#dde1e9] rounded-md shadow-sm text-[12px] font-mono text-[#374151]">
                     <div className="flex justify-between">
                       <span>Mosca Urgency Score (M):</span>
@@ -111,15 +111,15 @@ function AppPriorityRow({ app, horizon }: { app: any; horizon: number }) {
                       <span>Business Criticality Score (B):</span>
                       <span className="font-semibold">{bc}</span>
                     </div>
-                    
+
                     <div className="my-2 border-t border-[#f0f2f5]"></div>
-                    
+
                     <div>APS = (Mosca + DataSensitivity + BusinessCriticality) / 3</div>
                     <div className="text-[#1e3a5f] font-semibold">APS = ({mosca.score} + {ds} + {bc}) / 3</div>
                     <div className="text-[13px] font-bold text-[#1a1d23]">APS = {aps.toFixed(2)}</div>
-                    
+
                     <div className="my-2 border-t border-[#f0f2f5]"></div>
-                    
+
                     <div className="flex justify-between font-bold text-[#1a1d23]">
                       <span>Final Application Priority:</span>
                       <span className={priorityConfig[priorityText]?.cls.split(' ')[1] || ""}>{priorityText}</span>
@@ -132,7 +132,7 @@ function AppPriorityRow({ app, horizon }: { app: any; horizon: number }) {
                   <div className="flex items-center gap-2 mb-3">
                     <div className="text-[13px] font-bold text-[#1e3a5f]">Mosca Framework Variables & Margin</div>
                   </div>
-                  
+
                   <div className="space-y-2 bg-white p-4 border border-[#dde1e9] rounded-md shadow-sm text-[12px] text-[#374151]">
                     <div className="grid grid-cols-[220px_1fr] border-b border-[#f0f2f5] pb-1.5">
                       <span className="text-[#6b7589]">Data Protection Duration (X)</span>
@@ -313,8 +313,8 @@ export default function RiskTimeline({ selectedAnalysisId, onSelectAnalysis, ana
   const activeChartData = chartFocus === 'all'
     ? allChartData
     : chartFocus === 'top5'
-    ? top5ChartData
-    : selectedChartData;
+      ? top5ChartData
+      : selectedChartData;
 
   const maxVal = Math.max(
     12,
@@ -329,10 +329,10 @@ export default function RiskTimeline({ selectedAnalysisId, onSelectAnalysis, ana
   const barSize = chartFocus === 'selected'
     ? 32
     : activeChartData.length <= 4
-    ? 28
-    : activeChartData.length <= 8
-    ? 22
-    : 16;
+      ? 28
+      : activeChartData.length <= 8
+        ? 22
+        : 16;
 
   const handleHorizonYearChange = async (year: number) => {
     setHorizonYear(year);
@@ -352,14 +352,14 @@ export default function RiskTimeline({ selectedAnalysisId, onSelectAnalysis, ana
   return (
     <div className="flex-1 overflow-y-auto bg-[#f5f6f8]">
       <div className="max-w-[1320px] mx-auto px-6 py-6 space-y-5">
-        
+
         {/* Top bar with Application Selector and Threat Horizon */}
         <div className="bg-white border border-[#dde1e9] rounded-lg px-5 py-4 flex items-center justify-between shadow-sm flex-wrap gap-4">
           <div>
             <div className="text-[14px] font-bold text-[#1e3a5f]">Application Migration Priority</div>
             <div className="text-[11px] text-[#6b7589]">Calculates migration urgency from Mosca's theorem (Reference Year: 2026), Data Sensitivity, and Business Criticality.</div>
           </div>
-          
+
           <div className="flex items-center gap-6">
             {/* Threat Horizon Year + Derived Z */}
             <div className="flex items-center gap-3 bg-[#f8fafc] border border-[#dde1e9] px-3 py-1.5 rounded-md">
@@ -380,7 +380,56 @@ export default function RiskTimeline({ selectedAnalysisId, onSelectAnalysis, ana
           </div>
         </div>
 
-        {/* SECTION 15: APPLICATION PRIORITY — SHOW ACTUAL VALUES FOR SELECTED APP */}
+        {/* MOSCA TIMING MODEL DEFINITION SECTION */}
+        <div className="bg-white border border-[#dde1e9] rounded-lg p-5 shadow-sm space-y-4">
+          <div className="border-b border-[#dde1e9] pb-3">
+            <h3 className="text-[14px] font-bold text-[#1e3a5f]">MOSCA Timing Model</h3>
+          </div>
+
+          <p className="text-[12px] text-gray-600 leading-relaxed">
+            MOSCA is a timing-based model used to determine how urgently an application's cryptographic assets should be migrated to quantum-safe cryptography. It compares the remaining protection time with the time required for cryptographic migration against the expected quantum-risk horizon.
+          </p>
+
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+            <div className="bg-[#f9fafb] border border-[#dde1e9] rounded-md p-3">
+              <div className="text-[11px] font-bold text-[#1a1d23] mb-1">
+                <span className="font-mono text-sm text-[#1e3a5f] font-bold mr-1.5">X</span>- Protection Duration
+              </div>
+              <div className="text-[11px] text-[#6b7589] leading-relaxed">
+                Time for which the protected data must remain secure.
+              </div>
+            </div>
+
+            <div className="bg-[#f9fafb] border border-[#dde1e9] rounded-md p-3">
+              <div className="text-[11px] font-bold text-[#1a1d23] mb-1">
+                <span className="font-mono text-sm text-[#1e3a5f] font-bold mr-1.5">Y</span>- Migration Duration
+              </div>
+              <div className="text-[11px] text-[#6b7589] leading-relaxed">
+                Estimated time required to migrate the application's cryptographic assets to quantum-safe alternatives.
+              </div>
+            </div>
+
+            <div className="bg-[#f9fafb] border border-[#dde1e9] rounded-md p-3">
+              <div className="text-[11px] font-bold text-[#1a1d23] mb-1">
+                <span className="font-mono text-sm text-[#1e3a5f] font-bold mr-1.5">Z</span>- Quantum Risk Horizon
+              </div>
+              <div className="text-[11px] text-[#6b7589] leading-relaxed">
+                Number of years remaining until the expected quantum-risk horizon.
+              </div>
+            </div>
+          </div>
+
+          <div className="bg-[#f0f5fc] border border-[#d3e2f5] rounded-md p-3.5 text-center">
+            <div className="font-mono text-base font-bold text-[#1e3a5f]">
+              Timing Margin = Z − (X + Y)
+            </div>
+            <p className="text-[11px] text-gray-600 mt-1.5 leading-relaxed">
+              If the timing margin is small or negative, migration urgency increases. A larger positive margin indicates more time is available for migration.
+            </p>
+          </div>
+        </div>
+
+        {/* SECTION 15: APPLICATION PRIORITY - SHOW ACTUAL VALUES FOR SELECTED APP */}
         {activeApp && (
           <div className="bg-white border border-[#dde1e9] rounded-lg p-5 shadow-sm">
             <div className="flex items-center justify-between border-b border-[#dde1e9] pb-3 mb-4">
@@ -539,42 +588,39 @@ export default function RiskTimeline({ selectedAnalysisId, onSelectAnalysis, ana
                 {chartFocus === 'all'
                   ? "Mosca Timeline Comparison (All Applications)"
                   : chartFocus === 'top5'
-                  ? "Mosca Timeline Comparison (Top 5 Critical Apps)"
-                  : "Mosca Timeline Comparison (Selected Application Focus)"}
+                    ? "Mosca Timeline Comparison (Top 5 Critical Apps)"
+                    : "Mosca Timeline Comparison (Selected Application Focus)"}
               </div>
               <div className="text-[11px] text-[#6b7589]">
                 Comparing Data Protection Duration (X) + Migration Duration (Y) against Quantum Threat Horizon (Z = {actZ} years) across {chartFocus === 'all' ? 'all applications' : chartFocus === 'top5' ? 'top 5 critical applications' : (activeApp?.applicationName || 'selected application')}.
               </div>
             </div>
-            
+
             <div className="flex items-center gap-1 bg-[#f5f6f8] p-1 rounded-md border border-[#dde1e9] text-xs">
               <button
                 onClick={() => setChartFocus('all')}
-                className={`px-3 py-1 rounded font-medium transition-colors ${
-                  chartFocus === 'all'
+                className={`px-3 py-1 rounded font-medium transition-colors ${chartFocus === 'all'
                     ? 'bg-[#1e3a5f] text-white shadow-sm'
                     : 'text-[#6b7589] hover:text-[#1a1d23]'
-                }`}
+                  }`}
               >
                 All Applications
               </button>
               <button
                 onClick={() => setChartFocus('top5')}
-                className={`px-3 py-1 rounded font-medium transition-colors ${
-                  chartFocus === 'top5'
+                className={`px-3 py-1 rounded font-medium transition-colors ${chartFocus === 'top5'
                     ? 'bg-[#1e3a5f] text-white shadow-sm'
                     : 'text-[#6b7589] hover:text-[#1a1d23]'
-                }`}
+                  }`}
               >
                 Top 5 Critical Apps
               </button>
               <button
                 onClick={() => setChartFocus('selected')}
-                className={`px-3 py-1 rounded font-medium transition-colors ${
-                  chartFocus === 'selected'
+                className={`px-3 py-1 rounded font-medium transition-colors ${chartFocus === 'selected'
                     ? 'bg-[#1e3a5f] text-white shadow-sm'
                     : 'text-[#6b7589] hover:text-[#1a1d23]'
-                }`}
+                  }`}
               >
                 Selected Application Focus
               </button>

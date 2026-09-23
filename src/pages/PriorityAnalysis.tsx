@@ -254,7 +254,7 @@ export default function PriorityAnalysis({ selectedAnalysisId, onSelectAnalysis,
           <div className="px-6 py-4 border-b border-[#dde1e9] flex flex-wrap items-center justify-between gap-2 bg-[#fafbfc]">
             <div>
               <div className="text-sm font-bold text-[#1a1d23]">
-                Component Priority Table — {appDisplayName}
+                Component Priority Table - {appDisplayName}
               </div>
               <div className="text-xs font-semibold text-[#1e3a5f] mt-0.5">
                 Total Cryptographic Asset Occurrences: {cbomOccurrencesCount} • Total Unique Logical Assets: {uniqueAssetsCount} ({numericScoredCount} Numeric Priority-Scored, {nonNumericCount} Non-Numeric / Evidence-Required)
@@ -352,9 +352,8 @@ export default function PriorityAnalysis({ selectedAnalysisId, onSelectAnalysis,
                       <Fragment key={a.assetId || idx}>
                         <tr
                           onClick={() => toggleRow(a.assetId)}
-                          className={`hover:bg-blue-50/40 cursor-pointer transition-colors ${
-                            isExpanded ? "bg-blue-50/30" : ""
-                          }`}
+                          className={`hover:bg-blue-50/40 cursor-pointer transition-colors ${isExpanded ? "bg-blue-50/30" : ""
+                            }`}
                         >
                           {/* Rank */}
                           <td className="py-3 px-4 whitespace-nowrap">
@@ -364,10 +363,9 @@ export default function PriorityAnalysis({ selectedAnalysisId, onSelectAnalysis,
                               ) : (
                                 <ChevronRight size={14} className="text-gray-400" />
                               )}
-                              <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border inline-block ${
-                                isUnavailable ? "—" : (rankBadge[rankNum] || rankBadge[5])
-                              }`}>
-                                {isUnavailable ? "—" : `P${rankNum}`}
+                              <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border inline-block ${isUnavailable ? "-" : (rankBadge[rankNum] || rankBadge[5])
+                                }`}>
+                                {isUnavailable ? "-" : `P${rankNum}`}
                               </span>
                             </div>
                           </td>
@@ -408,20 +406,18 @@ export default function PriorityAnalysis({ selectedAnalysisId, onSelectAnalysis,
 
                           {/* Quantum Risk */}
                           <td className="py-3 px-4 whitespace-nowrap">
-                            <span className={`font-semibold ${
-                              a.scores.quantumRisk === 100 ? 'text-red-700' :
-                              a.scores.quantumRisk === 60 ? 'text-amber-700' :
-                              (a.scores.quantumRisk === 20 || a.scores.quantumRisk === 15 || a.scores.quantumRisk === 10) ? 'text-emerald-700' : 'text-gray-500'
-                            }`}>
+                            <span className={`font-semibold ${a.scores.quantumRisk === 100 ? 'text-red-700' :
+                                a.scores.quantumRisk === 60 ? 'text-amber-700' :
+                                  (a.scores.quantumRisk === 20 || a.scores.quantumRisk === 15 || a.scores.quantumRisk === 10) ? 'text-emerald-700' : 'text-gray-500'
+                              }`}>
                               {qRiskText}
                             </span>
                           </td>
 
                           {/* Dependency Impact */}
                           <td className="py-3 px-4 whitespace-nowrap">
-                            <span className={`font-semibold ${
-                              a.scores.dependencyImpact !== null ? 'text-[#1e3a5f]' : 'text-gray-500 italic'
-                            }`}>
+                            <span className={`font-semibold ${a.scores.dependencyImpact !== null ? 'text-[#1e3a5f]' : 'text-gray-500 italic'
+                              }`}>
                               {depImpactText}
                             </span>
                           </td>
@@ -437,7 +433,7 @@ export default function PriorityAnalysis({ selectedAnalysisId, onSelectAnalysis,
                                 </span>
                                 {isPartial && (
                                   <div className="text-[9px] text-amber-700 font-medium">
-                                    Partial CPS — based on available evidence
+                                    Partial CPS - based on available evidence
                                   </div>
                                 )}
                               </div>
@@ -462,10 +458,10 @@ export default function PriorityAnalysis({ selectedAnalysisId, onSelectAnalysis,
                           <tr className="bg-[#f8fafc] border-b border-[#dde1e9]">
                             <td colSpan={10} className="p-5">
                               <div className="bg-white border border-[#dde1e9] rounded-lg p-5 shadow-2xs space-y-4">
-                                
+
                                 <div className="flex items-center justify-between pb-2 border-b border-[#dde1e9]">
                                   <div className="font-bold text-sm text-[#1e3a5f] flex items-center gap-2">
-                                    <Layers size={16} /> Detailed Calculation & Evidence — {a.assetName}
+                                    <Layers size={16} /> Detailed Calculation & Evidence - {a.assetName}
                                   </div>
                                   <div className="text-[11px] text-[#6b7589]">
                                     {a.occurrencesCount} {a.occurrencesCount === 1 ? 'occurrence' : 'occurrences'} across {locs.length} {locs.length === 1 ? 'location' : 'locations'}
@@ -473,7 +469,7 @@ export default function PriorityAnalysis({ selectedAnalysisId, onSelectAnalysis,
                                 </div>
 
                                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                                  
+
                                   {/* Section A: Quantum Risk */}
                                   <div className="border border-[#dde1e9] rounded-md p-4 bg-[#fcfdfe] flex flex-col justify-between">
                                     <div>
@@ -483,12 +479,12 @@ export default function PriorityAnalysis({ selectedAnalysisId, onSelectAnalysis,
                                       <div className="space-y-1.5 text-xs">
                                         <div className="flex justify-between">
                                           <span className="text-[#6b7589]">Classification:</span>
-                                          <span className="font-bold text-[#1a1d23]">{a.scores.quantumRiskClassification}</span>
+                                          <span className="font-bold text-[#1a1d23]">{a.scores.quantumRiskClassification === 'Unknown' ? 'Unknown / Review' : a.scores.quantumRiskClassification}</span>
                                         </div>
                                         <div className="flex justify-between">
                                           <span className="text-[#6b7589]">Score:</span>
                                           <span className="font-bold text-[#1a1d23]">
-                                            {a.scores.quantumRisk !== null ? a.scores.quantumRisk : "Unavailable"}
+                                            {a.scores.quantumRisk !== null ? a.scores.quantumRisk : "-"}
                                           </span>
                                         </div>
                                       </div>
@@ -548,7 +544,7 @@ export default function PriorityAnalysis({ selectedAnalysisId, onSelectAnalysis,
                                         <div className="flex justify-between">
                                           <span className="text-[#6b7589]">Quantum Risk Score:</span>
                                           <span className="font-bold text-[#1a1d23]">
-                                            {a.scores.quantumRisk !== null ? a.scores.quantumRisk : "Unavailable"}
+                                            {a.scores.quantumRisk !== null ? a.scores.quantumRisk : "-"}
                                           </span>
                                         </div>
                                         <div className="flex justify-between">
@@ -575,7 +571,7 @@ export default function PriorityAnalysis({ selectedAnalysisId, onSelectAnalysis,
                                         </div>
                                       ) : a.scores.priorityScore !== null ? (
                                         <div className="p-1.5 bg-amber-50 border border-amber-100 rounded font-mono text-[10px] text-amber-900">
-                                          CPS = {a.scores.priorityScore} (Partial CPS — based on available evidence)
+                                          CPS = {a.scores.priorityScore} (Partial CPS - based on available evidence)
                                         </div>
                                       ) : (
                                         <div className="p-1.5 bg-gray-50 border border-gray-200 rounded font-mono text-[10px] text-gray-600">

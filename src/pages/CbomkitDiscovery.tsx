@@ -1,16 +1,16 @@
 import React, { useEffect, useState, useMemo, useRef } from 'react';
-import { 
-  Loader2, 
-  CheckCircle2, 
-  AlertTriangle, 
-  Download, 
-  GitBranch, 
-  FolderOpen, 
-  Search, 
-  ChevronRight, 
-  Shield, 
-  Cpu, 
-  Key, 
+import {
+  Loader2,
+  CheckCircle2,
+  AlertTriangle,
+  Download,
+  GitBranch,
+  FolderOpen,
+  Search,
+  ChevronRight,
+  Shield,
+  Cpu,
+  Key,
   Layers,
   ExternalLink,
   Play
@@ -26,11 +26,11 @@ interface CbomkitDiscoveryProps {
 
 const CBOMKIT_URL = 'http://localhost:8001/';
 
-export default function CbomkitDiscovery({ 
-  onNavigate, 
-  analysisId, 
-  onSelectAnalysis, 
-  refreshAnalyses 
+export default function CbomkitDiscovery({
+  onNavigate,
+  analysisId,
+  onSelectAnalysis,
+  refreshAnalyses
 }: CbomkitDiscoveryProps) {
   const [isCompleted, setIsCompleted] = useState(false);
   const [hasFailed, setHasFailed] = useState(false);
@@ -65,7 +65,7 @@ export default function CbomkitDiscovery({
     if (onSelectAnalysis) onSelectAnalysis(analysisId);
     try {
       localStorage.setItem('cryptavista_selected_analysis_id', analysisId);
-    } catch {}
+    } catch { }
   }, [analysisId, onSelectAnalysis]);
 
   // Fetch initial analysis metadata
@@ -113,7 +113,7 @@ export default function CbomkitDiscovery({
       if (res.ok) {
         setHasCbom(true);
       }
-    } catch {}
+    } catch { }
   };
 
   // Status polling & lifecycle management
@@ -329,7 +329,7 @@ export default function CbomkitDiscovery({
   const filteredAssets = useMemo(() => {
     if (!search.trim()) return assets;
     const q = search.toLowerCase();
-    return assets.filter(a => 
+    return assets.filter(a =>
       (a.assetName && a.assetName.toLowerCase().includes(q)) ||
       (a.assetType && a.assetType.toLowerCase().includes(q)) ||
       (a.primitive && a.primitive.toLowerCase().includes(q)) ||
@@ -359,21 +359,19 @@ export default function CbomkitDiscovery({
             <div className="flex items-center bg-white/10 rounded-lg p-0.5 border border-white/10">
               <button
                 onClick={() => setActiveTab('scanner')}
-                className={`px-3 py-1 rounded-md text-[11px] font-semibold transition-all ${
-                  activeTab === 'scanner'
+                className={`px-3 py-1 rounded-md text-[11px] font-semibold transition-all ${activeTab === 'scanner'
                     ? 'bg-blue-600 text-white shadow-sm'
                     : 'text-blue-200/70 hover:text-white'
-                }`}
+                  }`}
               >
                 CBOM Interface
               </button>
               <button
                 onClick={() => setActiveTab('assets')}
-                className={`px-3 py-1 rounded-md text-[11px] font-semibold transition-all ${
-                  activeTab === 'assets'
+                className={`px-3 py-1 rounded-md text-[11px] font-semibold transition-all ${activeTab === 'assets'
                     ? 'bg-blue-600 text-white shadow-sm'
                     : 'text-blue-200/70 hover:text-white'
-                }`}
+                  }`}
               >
                 Discovered Assets ({assets.length})
               </button>
@@ -383,11 +381,10 @@ export default function CbomkitDiscovery({
           <button
             onClick={handleDownloadCbom}
             disabled={!hasCbom || isDownloadingCbom}
-            className={`flex items-center gap-1.5 text-[11px] font-semibold px-3 py-1.5 rounded-md border transition-all ${
-              hasCbom 
-                ? 'bg-white/10 hover:bg-white/20 border-white/20 text-white shadow-sm cursor-pointer' 
+            className={`flex items-center gap-1.5 text-[11px] font-semibold px-3 py-1.5 rounded-md border transition-all ${hasCbom
+                ? 'bg-white/10 hover:bg-white/20 border-white/20 text-white shadow-sm cursor-pointer'
                 : 'bg-white/5 border-white/10 text-white/40 cursor-not-allowed'
-            }`}
+              }`}
             title={hasCbom ? 'Download authentic CycloneDX CBOM JSON' : 'CBOM is compiling...'}
           >
             <Download size={13} />
@@ -417,7 +414,7 @@ export default function CbomkitDiscovery({
               <span>{isFolder ? 'Project Folder' : 'Git Repository'}</span>
             </div>
             <div className="flex items-center gap-4">
-              <span>Analysis ID: <strong className="font-mono text-blue-300">{analysisId || '—'}</strong></span>
+              <span>Analysis ID: <strong className="font-mono text-blue-300">{analysisId || '-'}</strong></span>
               <a
                 href={CBOMKIT_URL}
                 target="_blank"
@@ -504,7 +501,7 @@ export default function CbomkitDiscovery({
                   <AlertTriangle className="text-amber-400 mb-3" size={32} />
                   <div className="text-white text-[14px] font-bold mb-2">Discovery UI Not Loading in Iframe</div>
                   <div className="text-blue-200/70 text-[12px] text-center mb-5 max-w-md">
-                    The scanner interface may be blocking embedded display. Use the button below to open it in a new tab — scan your project there, then return here and CRYPTAVISTA will automatically detect the result.
+                    The scanner interface may be blocking embedded display. Use the button below to open it in a new tab - scan your project there, then return here and CRYPTAVISTA will automatically detect the result.
                   </div>
                   <a
                     href={CBOMKIT_URL}
@@ -532,320 +529,317 @@ export default function CbomkitDiscovery({
         /* Discovered Assets & Metrics View */
         <div className="flex-1 max-w-[1400px] w-full mx-auto px-6 py-5 space-y-4 pb-28">
 
-        {/* Source Information Card */}
-        <div className="bg-[#132338] border border-white/10 rounded-xl p-4 shadow-md flex flex-wrap items-center justify-between gap-4">
-          <div className="flex items-center gap-3.5">
-            <div className="w-10 h-10 rounded-lg bg-blue-500/10 border border-blue-500/20 flex items-center justify-center text-blue-400 shrink-0">
-              {isFolder ? <FolderOpen size={20} /> : <GitBranch size={20} />}
-            </div>
-            <div>
-              <div className="flex items-center gap-2">
-                <span className="text-white font-bold text-[13px]">
-                  {appName || (isFolder ? 'Project Folder Target' : 'Git Repository Target')}
-                </span>
-                <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-blue-500/20 text-blue-300 border border-blue-500/30">
-                  {isFolder ? 'Project Folder' : 'Git Repository'}
-                </span>
-              </div>
-              <div className="text-blue-200/60 text-[11px] font-mono mt-0.5">
-                {isFolder 
-                  ? `Application Name: ${appName || 'Local Project'} | Source Type: Folder Archive`
-                  : (repoUrl || 'https://github.com/repository.git')}
-              </div>
-            </div>
-          </div>
-
-          <div className="flex items-center gap-6 text-[11px] text-blue-200/70">
-            {!isFolder && (
-              <>
-                <div className="flex flex-col">
-                  <span className="text-blue-200/40 text-[10px] uppercase font-semibold">Revision / Branch</span>
-                  <span className="font-mono text-white font-medium">{gitBranch || 'main'}</span>
-                </div>
-                <div className="flex flex-col">
-                  <span className="text-blue-200/40 text-[10px] uppercase font-semibold">Commit</span>
-                  <span className="font-mono text-white font-medium">{gitCommit ? gitCommit.substring(0, 7) : 'HEAD'}</span>
-                </div>
-              </>
-            )}
-            <div className="flex flex-col">
-              <span className="text-blue-200/40 text-[10px] uppercase font-semibold">Analysis ID</span>
-              <span className="font-mono text-blue-300 font-bold">{analysisId || '—'}</span>
-            </div>
-          </div>
-        </div>
-
-        {/* Live Discovery Status Banner */}
-        <div className={`border rounded-xl p-4 transition-all shadow-md relative overflow-hidden ${
-          isCompleted 
-            ? 'bg-emerald-950/20 border-emerald-500/40' 
-            : hasFailed 
-            ? 'bg-red-950/20 border-red-500/40' 
-            : 'bg-[#152740] border-blue-500/30'
-        }`}>
-          <div className="flex items-center justify-between">
+          {/* Source Information Card */}
+          <div className="bg-[#132338] border border-white/10 rounded-xl p-4 shadow-md flex flex-wrap items-center justify-between gap-4">
             <div className="flex items-center gap-3.5">
-              <div className={`p-2.5 rounded-lg shrink-0 ${
-                isCompleted 
-                  ? 'bg-emerald-500/20 text-emerald-400' 
-                  : hasFailed 
-                  ? 'bg-red-500/20 text-red-400' 
-                  : 'bg-blue-500/20 text-blue-400'
-              }`}>
-                {isCompleted ? (
-                  <CheckCircle2 size={22} className="text-emerald-400" />
-                ) : hasFailed ? (
-                  <AlertTriangle size={22} className="text-red-400" />
-                ) : (
-                  <Loader2 size={22} className="animate-spin text-blue-400" />
-                )}
+              <div className="w-10 h-10 rounded-lg bg-blue-500/10 border border-blue-500/20 flex items-center justify-center text-blue-400 shrink-0">
+                {isFolder ? <FolderOpen size={20} /> : <GitBranch size={20} />}
               </div>
               <div>
-                <h2 className="text-[14px] font-bold text-white">
+                <div className="flex items-center gap-2">
+                  <span className="text-white font-bold text-[13px]">
+                    {appName || (isFolder ? 'Project Folder Target' : 'Git Repository Target')}
+                  </span>
+                  <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-blue-500/20 text-blue-300 border border-blue-500/30">
+                    {isFolder ? 'Project Folder' : 'Git Repository'}
+                  </span>
+                </div>
+                <div className="text-blue-200/60 text-[11px] font-mono mt-0.5">
+                  {isFolder
+                    ? `Application Name: ${appName || 'Local Project'} | Source Type: Folder Archive`
+                    : (repoUrl || 'https://github.com/repository.git')}
+                </div>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-6 text-[11px] text-blue-200/70">
+              {!isFolder && (
+                <>
+                  <div className="flex flex-col">
+                    <span className="text-blue-200/40 text-[10px] uppercase font-semibold">Revision / Branch</span>
+                    <span className="font-mono text-white font-medium">{gitBranch || 'main'}</span>
+                  </div>
+                  <div className="flex flex-col">
+                    <span className="text-blue-200/40 text-[10px] uppercase font-semibold">Commit</span>
+                    <span className="font-mono text-white font-medium">{gitCommit ? gitCommit.substring(0, 7) : 'HEAD'}</span>
+                  </div>
+                </>
+              )}
+              <div className="flex flex-col">
+                <span className="text-blue-200/40 text-[10px] uppercase font-semibold">Analysis ID</span>
+                <span className="font-mono text-blue-300 font-bold">{analysisId || '-'}</span>
+              </div>
+            </div>
+          </div>
+
+          {/* Live Discovery Status Banner */}
+          <div className={`border rounded-xl p-4 transition-all shadow-md relative overflow-hidden ${isCompleted
+              ? 'bg-emerald-950/20 border-emerald-500/40'
+              : hasFailed
+                ? 'bg-red-950/20 border-red-500/40'
+                : 'bg-[#152740] border-blue-500/30'
+            }`}>
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3.5">
+                <div className={`p-2.5 rounded-lg shrink-0 ${isCompleted
+                    ? 'bg-emerald-500/20 text-emerald-400'
+                    : hasFailed
+                      ? 'bg-red-500/20 text-red-400'
+                      : 'bg-blue-500/20 text-blue-400'
+                  }`}>
                   {isCompleted ? (
-                    <span>{assets.length} cryptographic assets found.</span>
+                    <CheckCircle2 size={22} className="text-emerald-400" />
                   ) : hasFailed ? (
-                    <span className="text-red-300">Discovery failed</span>
+                    <AlertTriangle size={22} className="text-red-400" />
                   ) : (
-                    <span>
-                      Scanning code for cryptographic assets...{' '}
-                      {assets.length > 0 && (
-                        <span className="text-blue-300 font-normal">
-                          ({assets.length} cryptographic assets found...)
-                        </span>
-                      )}
-                    </span>
+                    <Loader2 size={22} className="animate-spin text-blue-400" />
                   )}
-                </h2>
-                <p className="text-[11px] text-blue-200/70 mt-0.5">
-                  {isCompleted ? (
-                    scannedLines > 0 
-                      ? `Scanned ${scannedLines.toLocaleString()} lines of code across ${scannedFiles} files. CycloneDX CBOM components generated.`
-                      : 'Cryptographic Bill of Materials (CBOM) generated and ingested successfully.'
-                  ) : hasFailed ? (
-                    errorMessage || 'The scanner encountered an issue. Please verify scanner logs.'
-                  ) : (
-                    scannedLines > 0
-                      ? `Scanned ${scannedLines.toLocaleString()} lines of code across ${scannedFiles} files... extracting primitives.`
-                      : 'Extracting cryptographic algorithms, key material, and operational usages from codebase.'
-                  )}
-                </p>
+                </div>
+                <div>
+                  <h2 className="text-[14px] font-bold text-white">
+                    {isCompleted ? (
+                      <span>{assets.length} cryptographic assets found.</span>
+                    ) : hasFailed ? (
+                      <span className="text-red-300">Discovery failed</span>
+                    ) : (
+                      <span>
+                        Scanning code for cryptographic assets...{' '}
+                        {assets.length > 0 && (
+                          <span className="text-blue-300 font-normal">
+                            ({assets.length} cryptographic assets found...)
+                          </span>
+                        )}
+                      </span>
+                    )}
+                  </h2>
+                  <p className="text-[11px] text-blue-200/70 mt-0.5">
+                    {isCompleted ? (
+                      scannedLines > 0
+                        ? `Scanned ${scannedLines.toLocaleString()} lines of code across ${scannedFiles} files. CycloneDX CBOM components generated.`
+                        : 'Cryptographic Bill of Materials (CBOM) generated and ingested successfully.'
+                    ) : hasFailed ? (
+                      errorMessage || 'The scanner encountered an issue. Please verify scanner logs.'
+                    ) : (
+                      scannedLines > 0
+                        ? `Scanned ${scannedLines.toLocaleString()} lines of code across ${scannedFiles} files... extracting primitives.`
+                        : 'Extracting cryptographic algorithms, key material, and operational usages from codebase.'
+                    )}
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <span className={`px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider ${isCompleted
+                    ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/40'
+                    : hasFailed
+                      ? 'bg-red-500/20 text-red-400 border border-red-500/40'
+                      : 'bg-blue-500/20 text-blue-300 border border-blue-500/40 animate-pulse'
+                  }`}>
+                  {isCompleted ? 'Completed' : hasFailed ? 'Failed' : 'Running'}
+                </span>
               </div>
             </div>
 
-            <div className="flex items-center gap-2">
-              <span className={`px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider ${
-                isCompleted 
-                  ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/40' 
-                  : hasFailed 
-                  ? 'bg-red-500/20 text-red-400 border border-red-500/40' 
-                  : 'bg-blue-500/20 text-blue-300 border border-blue-500/40 animate-pulse'
-              }`}>
-                {isCompleted ? 'Completed' : hasFailed ? 'Failed' : 'Running'}
-              </span>
-            </div>
+            {!isCompleted && !hasFailed && (
+              <div className="w-full bg-blue-950/40 h-1 rounded-full mt-3 overflow-hidden">
+                <div className="bg-blue-500 h-full w-1/3 rounded-full animate-pulse" />
+              </div>
+            )}
           </div>
 
-          {!isCompleted && !hasFailed && (
-            <div className="w-full bg-blue-950/40 h-1 rounded-full mt-3 overflow-hidden">
-              <div className="bg-blue-500 h-full w-1/3 rounded-full animate-pulse" />
-            </div>
-          )}
-        </div>
-
-        {/* Discovery Analytics Cards */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-          {/* Card 1: Crypto Assets */}
-          <div className="bg-[#132338] border border-white/10 rounded-xl p-4 flex flex-col justify-between">
-            <div>
-              <div className="flex items-center justify-between text-blue-200/60 mb-1">
-                <span className="text-[11px] font-semibold uppercase tracking-wider">Crypto Assets</span>
-                <Cpu size={15} className="text-blue-400" />
+          {/* Discovery Analytics Cards */}
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+            {/* Card 1: Crypto Assets */}
+            <div className="bg-[#132338] border border-white/10 rounded-xl p-4 flex flex-col justify-between">
+              <div>
+                <div className="flex items-center justify-between text-blue-200/60 mb-1">
+                  <span className="text-[11px] font-semibold uppercase tracking-wider">Crypto Assets</span>
+                  <Cpu size={15} className="text-blue-400" />
+                </div>
+                <div className="text-[26px] font-bold text-white tracking-tight">
+                  {assets.length}
+                </div>
+                <div className="text-[11px] text-blue-200/60 mt-0.5">
+                  Total detected cryptographic asset occurrences
+                </div>
               </div>
-              <div className="text-[26px] font-bold text-white tracking-tight">
-                {assets.length}
+              <div className="mt-4 pt-3 border-t border-white/10 flex items-center justify-between text-[11px]">
+                <span className="text-blue-200/70">Algorithms: <strong className="text-white">{algoCount}</strong></span>
+                <span className="text-blue-200/70">Keys: <strong className="text-white">{keyCount}</strong></span>
               </div>
-              <div className="text-[11px] text-blue-200/60 mt-0.5">
-                Total detected cryptographic asset occurrences
-              </div>
-            </div>
-            <div className="mt-4 pt-3 border-t border-white/10 flex items-center justify-between text-[11px]">
-              <span className="text-blue-200/70">Algorithms: <strong className="text-white">{algoCount}</strong></span>
-              <span className="text-blue-200/70">Keys: <strong className="text-white">{keyCount}</strong></span>
-            </div>
-          </div>
-
-          {/* Card 2: Crypto Primitives */}
-          <div className="bg-[#132338] border border-white/10 rounded-xl p-4 flex flex-col justify-between">
-            <div>
-              <div className="flex items-center justify-between text-blue-200/60 mb-1">
-                <span className="text-[11px] font-semibold uppercase tracking-wider">Crypto Primitives</span>
-                <Shield size={15} className="text-indigo-400" />
-              </div>
-              <div className="text-[26px] font-bold text-white tracking-tight">
-                {primitiveCounts.length}
-              </div>
-              <div className="text-[11px] text-blue-200/60 mt-0.5">
-                Distinct primitive categories detected
-              </div>
-            </div>
-            <div className="mt-3 pt-2.5 border-t border-white/10 flex flex-wrap gap-1.5 max-h-14 overflow-y-auto">
-              {primitiveCounts.length === 0 ? (
-                <span className="text-[10px] text-white/40">Detecting primitives...</span>
-              ) : (
-                primitiveCounts.slice(0, 3).map(([prim, count]) => (
-                  <span key={prim} className="px-2 py-0.5 bg-white/5 border border-white/10 rounded text-[10px] text-blue-200">
-                    {prim}: <strong className="text-white">{count}</strong>
-                  </span>
-                ))
-              )}
-            </div>
-          </div>
-
-          {/* Card 3: Crypto Functions */}
-          <div className="bg-[#132338] border border-white/10 rounded-xl p-4 flex flex-col justify-between">
-            <div>
-              <div className="flex items-center justify-between text-blue-200/60 mb-1">
-                <span className="text-[11px] font-semibold uppercase tracking-wider">Crypto Functions</span>
-                <Layers size={15} className="text-emerald-400" />
-              </div>
-              <div className="text-[26px] font-bold text-white tracking-tight">
-                {functionCounts.length}
-              </div>
-              <div className="text-[11px] text-blue-200/60 mt-0.5">
-                Active cryptographic operation categories
-              </div>
-            </div>
-            <div className="mt-3 pt-2.5 border-t border-white/10 flex flex-wrap gap-1.5 max-h-14 overflow-y-auto">
-              {functionCounts.length === 0 ? (
-                <span className="text-[10px] text-white/40">Analyzing functions...</span>
-              ) : (
-                functionCounts.slice(0, 3).map(([fn, count]) => (
-                  <span key={fn} className="px-2 py-0.5 bg-white/5 border border-white/10 rounded text-[10px] text-emerald-200">
-                    {fn}: <strong className="text-white">{count}</strong>
-                  </span>
-                ))
-              )}
-            </div>
-          </div>
-
-          {/* Card 4: Asset Types */}
-          <div className="bg-[#132338] border border-white/10 rounded-xl p-4 flex flex-col justify-between">
-            <div>
-              <div className="flex items-center justify-between text-blue-200/60 mb-1">
-                <span className="text-[11px] font-semibold uppercase tracking-wider">Asset Types</span>
-                <Key size={15} className="text-amber-400" />
-              </div>
-              <div className="text-[26px] font-bold text-white tracking-tight">
-                {typeCounts.length}
-              </div>
-              <div className="text-[11px] text-blue-200/60 mt-0.5">
-                CycloneDX cryptographic component types
-              </div>
-            </div>
-            <div className="mt-3 pt-2.5 border-t border-white/10 flex flex-wrap gap-1.5 max-h-14 overflow-y-auto">
-              {typeCounts.length === 0 ? (
-                <span className="text-[10px] text-white/40">Classifying types...</span>
-              ) : (
-                typeCounts.map(([typ, count]) => (
-                  <span key={typ} className="px-2 py-0.5 bg-white/5 border border-white/10 rounded text-[10px] text-amber-200">
-                    {typ}: <strong className="text-white">{count}</strong>
-                  </span>
-                ))
-              )}
-            </div>
-          </div>
-        </div>
-
-        {/* Cryptographic Asset Table */}
-        <div className="bg-[#132338] border border-white/10 rounded-xl overflow-hidden shadow-lg">
-          {/* Table Toolbar */}
-          <div className="px-5 py-3.5 border-b border-white/10 flex items-center justify-between bg-[#152740]">
-            <div>
-              <span className="text-[13px] font-bold text-white">
-                Cryptographic Assets ({filteredAssets.length})
-              </span>
-              <span className="text-[11px] text-blue-200/60 ml-2 hidden sm:inline">
-                Real scan findings extracted into CycloneDX CBOM
-              </span>
             </div>
 
-            <div className="flex items-center gap-2 bg-black/20 border border-white/10 rounded-lg px-3 py-1.5 w-64">
-              <Search size={13} className="text-blue-200/50 shrink-0" />
-              <input
-                value={search}
-                onChange={e => setSearch(e.target.value)}
-                placeholder="Search assets, type, location..."
-                className="bg-transparent text-[11px] text-white outline-none w-full placeholder-blue-200/40"
-              />
-            </div>
-          </div>
-
-          {/* Table Contents */}
-          <div className="overflow-x-auto">
-            <table className="w-full text-left text-[12px]">
-              <thead>
-                <tr className="bg-[#0e1c2f]/80 border-b border-white/10 text-blue-200/70 text-[10px] uppercase tracking-wider font-semibold">
-                  <th className="px-5 py-3">Cryptographic Asset</th>
-                  <th className="px-5 py-3">Type</th>
-                  <th className="px-5 py-3">Primitive</th>
-                  <th className="px-5 py-3">Location</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-white/5">
-                {assets.length === 0 && !isCompleted ? (
-                  <tr>
-                    <td colSpan={4} className="px-5 py-12 text-center text-blue-200/50">
-                      <div className="flex flex-col items-center justify-center gap-2">
-                        <Loader2 className="animate-spin text-blue-400" size={24} />
-                        <span className="text-[12px] font-medium text-white/70">
-                          Scanning code for cryptographic assets...
-                        </span>
-                        <span className="text-[10px] text-blue-200/40">
-                          Discovered algorithms, keys, and usages will appear dynamically.
-                        </span>
-                      </div>
-                    </td>
-                  </tr>
-                ) : filteredAssets.length === 0 ? (
-                  <tr>
-                    <td colSpan={4} className="px-5 py-10 text-center text-blue-200/50">
-                      No cryptographic assets found matching &ldquo;{search}&rdquo;
-                    </td>
-                  </tr>
+            {/* Card 2: Crypto Primitives */}
+            <div className="bg-[#132338] border border-white/10 rounded-xl p-4 flex flex-col justify-between">
+              <div>
+                <div className="flex items-center justify-between text-blue-200/60 mb-1">
+                  <span className="text-[11px] font-semibold uppercase tracking-wider">Crypto Primitives</span>
+                  <Shield size={15} className="text-indigo-400" />
+                </div>
+                <div className="text-[26px] font-bold text-white tracking-tight">
+                  {primitiveCounts.length}
+                </div>
+                <div className="text-[11px] text-blue-200/60 mt-0.5">
+                  Distinct primitive categories detected
+                </div>
+              </div>
+              <div className="mt-3 pt-2.5 border-t border-white/10 flex flex-wrap gap-1.5 max-h-14 overflow-y-auto">
+                {primitiveCounts.length === 0 ? (
+                  <span className="text-[10px] text-white/40">Detecting primitives...</span>
                 ) : (
-                  filteredAssets.map((asset, index) => (
-                    <tr key={asset.assetId || index} className="hover:bg-white/5 transition-colors">
-                      {/* Asset Name */}
-                      <td className="px-5 py-3 font-mono font-bold text-blue-300">
-                        {asset.assetName || asset.algorithm || '-'}
-                      </td>
-
-                      {/* Type */}
-                      <td className="px-5 py-3">
-                        <span className="px-2 py-0.5 rounded text-[11px] font-medium bg-white/5 border border-white/10 text-blue-200">
-                          {formatAssetType(asset.assetType)}
-                        </span>
-                      </td>
-
-                      {/* Primitive */}
-                      <td className="px-5 py-3 text-white/90">
-                        {formatPrimitive(asset.primitive)}
-                      </td>
-
-                      {/* Location */}
-                      <td className="px-5 py-3 font-mono text-[11px] text-blue-200/70 max-w-md truncate">
-                        {asset.location || asset.sourceLocation || '-'}
-                      </td>
-                    </tr>
+                  primitiveCounts.slice(0, 3).map(([prim, count]) => (
+                    <span key={prim} className="px-2 py-0.5 bg-white/5 border border-white/10 rounded text-[10px] text-blue-200">
+                      {prim}: <strong className="text-white">{count}</strong>
+                    </span>
                   ))
                 )}
-              </tbody>
-            </table>
-          </div>
-        </div>
+              </div>
+            </div>
 
-      </div>
+            {/* Card 3: Crypto Functions */}
+            <div className="bg-[#132338] border border-white/10 rounded-xl p-4 flex flex-col justify-between">
+              <div>
+                <div className="flex items-center justify-between text-blue-200/60 mb-1">
+                  <span className="text-[11px] font-semibold uppercase tracking-wider">Crypto Functions</span>
+                  <Layers size={15} className="text-emerald-400" />
+                </div>
+                <div className="text-[26px] font-bold text-white tracking-tight">
+                  {functionCounts.length}
+                </div>
+                <div className="text-[11px] text-blue-200/60 mt-0.5">
+                  Active cryptographic operation categories
+                </div>
+              </div>
+              <div className="mt-3 pt-2.5 border-t border-white/10 flex flex-wrap gap-1.5 max-h-14 overflow-y-auto">
+                {functionCounts.length === 0 ? (
+                  <span className="text-[10px] text-white/40">Analyzing functions...</span>
+                ) : (
+                  functionCounts.slice(0, 3).map(([fn, count]) => (
+                    <span key={fn} className="px-2 py-0.5 bg-white/5 border border-white/10 rounded text-[10px] text-emerald-200">
+                      {fn}: <strong className="text-white">{count}</strong>
+                    </span>
+                  ))
+                )}
+              </div>
+            </div>
+
+            {/* Card 4: Asset Types */}
+            <div className="bg-[#132338] border border-white/10 rounded-xl p-4 flex flex-col justify-between">
+              <div>
+                <div className="flex items-center justify-between text-blue-200/60 mb-1">
+                  <span className="text-[11px] font-semibold uppercase tracking-wider">Asset Types</span>
+                  <Key size={15} className="text-amber-400" />
+                </div>
+                <div className="text-[26px] font-bold text-white tracking-tight">
+                  {typeCounts.length}
+                </div>
+                <div className="text-[11px] text-blue-200/60 mt-0.5">
+                  CycloneDX cryptographic component types
+                </div>
+              </div>
+              <div className="mt-3 pt-2.5 border-t border-white/10 flex flex-wrap gap-1.5 max-h-14 overflow-y-auto">
+                {typeCounts.length === 0 ? (
+                  <span className="text-[10px] text-white/40">Classifying types...</span>
+                ) : (
+                  typeCounts.map(([typ, count]) => (
+                    <span key={typ} className="px-2 py-0.5 bg-white/5 border border-white/10 rounded text-[10px] text-amber-200">
+                      {typ}: <strong className="text-white">{count}</strong>
+                    </span>
+                  ))
+                )}
+              </div>
+            </div>
+          </div>
+
+          {/* Cryptographic Asset Table */}
+          <div className="bg-[#132338] border border-white/10 rounded-xl overflow-hidden shadow-lg">
+            {/* Table Toolbar */}
+            <div className="px-5 py-3.5 border-b border-white/10 flex items-center justify-between bg-[#152740]">
+              <div>
+                <span className="text-[13px] font-bold text-white">
+                  Cryptographic Assets ({filteredAssets.length})
+                </span>
+                <span className="text-[11px] text-blue-200/60 ml-2 hidden sm:inline">
+                  Real scan findings extracted into CycloneDX CBOM
+                </span>
+              </div>
+
+              <div className="flex items-center gap-2 bg-black/20 border border-white/10 rounded-lg px-3 py-1.5 w-64">
+                <Search size={13} className="text-blue-200/50 shrink-0" />
+                <input
+                  value={search}
+                  onChange={e => setSearch(e.target.value)}
+                  placeholder="Search assets, type, location..."
+                  className="bg-transparent text-[11px] text-white outline-none w-full placeholder-blue-200/40"
+                />
+              </div>
+            </div>
+
+            {/* Table Contents */}
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-[12px]">
+                <thead>
+                  <tr className="bg-[#0e1c2f]/80 border-b border-white/10 text-blue-200/70 text-[10px] uppercase tracking-wider font-semibold">
+                    <th className="px-5 py-3">Cryptographic Asset</th>
+                    <th className="px-5 py-3">Type</th>
+                    <th className="px-5 py-3">Primitive</th>
+                    <th className="px-5 py-3">Location</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-white/5">
+                  {assets.length === 0 && !isCompleted ? (
+                    <tr>
+                      <td colSpan={4} className="px-5 py-12 text-center text-blue-200/50">
+                        <div className="flex flex-col items-center justify-center gap-2">
+                          <Loader2 className="animate-spin text-blue-400" size={24} />
+                          <span className="text-[12px] font-medium text-white/70">
+                            Scanning code for cryptographic assets...
+                          </span>
+                          <span className="text-[10px] text-blue-200/40">
+                            Discovered algorithms, keys, and usages will appear dynamically.
+                          </span>
+                        </div>
+                      </td>
+                    </tr>
+                  ) : filteredAssets.length === 0 ? (
+                    <tr>
+                      <td colSpan={4} className="px-5 py-10 text-center text-blue-200/50">
+                        No cryptographic assets found matching &ldquo;{search}&rdquo;
+                      </td>
+                    </tr>
+                  ) : (
+                    filteredAssets.map((asset, index) => (
+                      <tr key={asset.assetId || index} className="hover:bg-white/5 transition-colors">
+                        {/* Asset Name */}
+                        <td className="px-5 py-3 font-mono font-bold text-blue-300">
+                          {asset.assetName || asset.algorithm || '-'}
+                        </td>
+
+                        {/* Type */}
+                        <td className="px-5 py-3">
+                          <span className="px-2 py-0.5 rounded text-[11px] font-medium bg-white/5 border border-white/10 text-blue-200">
+                            {formatAssetType(asset.assetType)}
+                          </span>
+                        </td>
+
+                        {/* Primitive */}
+                        <td className="px-5 py-3 text-white/90">
+                          {formatPrimitive(asset.primitive)}
+                        </td>
+
+                        {/* Location */}
+                        <td className="px-5 py-3 font-mono text-[11px] text-blue-200/70 max-w-md truncate">
+                          {asset.location || asset.sourceLocation || '-'}
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+        </div>
       )}
 
       {/* Floating Status Overlay (Discovery Stage) - Exact Reference Styling */}

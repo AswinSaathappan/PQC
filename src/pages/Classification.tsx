@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { CheckCircle2, AlertCircle, AlertTriangle, HelpCircle, Loader2, ShieldAlert, ChevronDown, ShieldCheck, Cpu } from "lucide-react";
 import axios from "axios";
+import { classifyAsset } from "../utils/quantumClassification";
 
 export interface AssetRecord {
   assetId: string;
@@ -52,124 +53,7 @@ const RISK_CONFIG: Record<string, { label: string; hex: string; bg: string; text
   },
 };
 
-/**
- * Format original CBOMKit classification without altering or replacing it.
- */
-function getCbomkitDisplay(asset: AssetRecord): { raw: string; label: string } {
-  const raw = (asset.cbomkitClassification || '').toLowerCase().trim();
-  if (raw === 'quantum-safe' || raw === 'quantum_safe') {
-    return { raw: 'quantum-safe', label: 'Quantum Safe' };
-  }
-  if (raw === 'quantum-vulnerable' || raw === 'quantum_vulnerable') {
-    return { raw: 'quantum-vulnerable', label: 'Not Quantum Safe' };
-  }
-  if (raw === 'na' || raw === 'not-applicable' || raw === 'not applicable') {
-    return { raw: 'na', label: 'Not Applicable' };
-  }
-  if (raw === 'unknown') {
-    return { raw: 'unknown', label: 'Unknown' };
-  }
 
-  // Fallback to legacy string if cbomkitClassification was not yet backfilled
-  const legacy = asset.cbomKitClassification || '';
-  if (legacy.includes('Quantum Safe')) return { raw: 'quantum-safe', label: 'Quantum Safe' };
-  if (legacy.includes('Not Quantum Safe')) return { raw: 'quantum-vulnerable', label: 'Not Quantum Safe' };
-  if (legacy.includes('Not Applicable')) return { raw: 'na', label: 'Not Applicable' };
-  return { raw: 'unknown', label: 'Unknown' };
-}
-
-/**
- * Resolves CRYPTAVISTA Quantum Risk with pure deterministic policy fallback
- * in case an asset document in the database was created prior to reprocessing.
- */
-function getCryptavistaQuantumRisk(asset: AssetRecord): {
-  risk: 'LOW' | 'MEDIUM' | 'HIGH' | 'UNKNOWN';
-  score: number | null;
-  classification: string;
-  reason: string;
-} {
-  if (asset.cryptavistaQuantumRisk) {
-    const rawR = asset.cryptavistaQuantumRisk as string;
-    let r: 'LOW' | 'MEDIUM' | 'HIGH' | 'UNKNOWN' = 'UNKNOWN';
-    if (rawR === 'LOW' || rawR === 'MEDIUM' || rawR === 'HIGH') {
-      r = rawR;
-    }
-    const s = typeof asset.cryptavistaScore === 'number'
-      ? asset.cryptavistaScore
-      : (r === 'LOW' ? 20 : r === 'MEDIUM' ? 60 : r === 'HIGH' ? 100 : null);
-    const c = asset.cryptavistaQuantumClassification === 'QUANTUM_SAFE'
-      ? 'Quantum Safe'
-      : asset.cryptavistaQuantumClassification === 'QUANTUM_RESISTANT'
-      ? 'Quantum Resistant'
-      : asset.cryptavistaQuantumClassification === 'NOT_QUANTUM_SAFE'
-      ? 'Not Quantum Safe'
-      : 'Unknown';
-    return {
-      risk: r,
-      score: s,
-      classification: c,
-      reason: asset.cryptavistaReason || ''
-    };
-  }
-
-  // Pure deterministic client-side evaluation fallback
-  const name = (asset.assetName || asset.algorithm || '').toUpperCase();
-  const normKeySize = asset.keySize 
-    ? Number(asset.keySize) 
-    : (asset.version && !isNaN(Number(asset.version)) ? Number(asset.version) : undefined);
-  
-  if (name.includes('ML-KEM') || name.includes('MLKEM') || name.includes('ML-DSA') || name.includes('SLH-DSA')) {
-    return {
-      risk: 'LOW',
-      score: 20,
-      classification: 'Quantum Safe',
-      reason: 'CRYPTAVISTA classifies standardized PQC algorithms as Low Quantum Risk (20).'
-    };
-  }
-
-  if (name.includes('RSA') || name.includes('ECDSA') || name.includes('ECDH') || name.includes('DH') || name.includes('DSA') || name.includes('ECC') || name.includes('ED25519') || name.includes('X25519')) {
-    return {
-      risk: 'HIGH',
-      score: 100,
-      classification: 'Not Quantum Safe',
-      reason: "Classical public-key mechanism exposed to quantum attacks of the Shor type."
-    };
-  }
-
-  if (name.includes('AES-128') || name.includes('AES128') || (name.includes('AES') && normKeySize === 128)) {
-    return {
-      risk: 'MEDIUM',
-      score: 60,
-      classification: 'Quantum Resistant',
-      reason: "CRYPTAVISTA classifies AES-128 as Medium Quantum Risk based on NIST's analysis of symmetric cryptography and quantum attacks."
-    };
-  }
-
-  if (name.includes('AES-192') || name.includes('AES-256') || name.includes('AES192') || name.includes('AES256') || (name.includes('AES') && (normKeySize === 256 || normKeySize === 192)) || name.includes('SHA256') || name.includes('SHA-256') || name.includes('SHA512') || name.includes('SHA-512') || name.includes('SHA3') || name.includes('HMAC') || name.includes('CHACHA20')) {
-    return {
-      risk: 'LOW',
-      score: 20,
-      classification: 'Quantum Resistant',
-      reason: "CRYPTAVISTA classifies this primitive as Low Quantum Risk based on NIST's analysis of symmetric cryptography and quantum attacks."
-    };
-  }
-
-  if (name.includes('AES')) {
-    return {
-      risk: 'MEDIUM',
-      score: 60,
-      classification: 'Quantum Resistant',
-      reason: "CRYPTAVISTA evaluates unversioned AES as Medium Quantum Risk (60) pending verified 256-bit key evidence."
-    };
-  }
-
-  return {
-    risk: 'UNKNOWN',
-    score: null,
-    classification: 'Unknown',
-    reason: 'Cryptographic primitive or algorithm could not be resolved from CBOM evidence.'
-  };
-}
 
 interface Props {
   selectedAnalysisId?: string;
@@ -197,7 +81,7 @@ export default function Classification({ selectedAnalysisId, onSelectAnalysis, a
           axios.get(`http://localhost:3001/api/analyses/${effectiveAnalysisId}/assets`),
           axios.get(`http://localhost:3001/api/analyses/${effectiveAnalysisId}`)
         ]);
-        
+
         if (appRes.data && appRes.data.analysisId === effectiveAnalysisId) {
           setAssets(asRes.data);
         }
@@ -215,7 +99,7 @@ export default function Classification({ selectedAnalysisId, onSelectAnalysis, a
   return (
     <div className="flex-1 overflow-y-auto bg-[#f5f6f8]">
       <div className="max-w-[1320px] mx-auto px-6 py-6 space-y-5">
-        
+
         {/* Top bar */}
         <div className="bg-white border border-[#dde1e9] rounded-lg px-5 py-4 shadow-xs">
           <div>
@@ -260,36 +144,41 @@ export default function Classification({ selectedAnalysisId, onSelectAnalysis, a
 
               <div className="divide-y divide-[#eef0f3]">
                 {assets.map((item: AssetRecord, idx: number) => {
-                  const cbomkit = getCbomkitDisplay(item);
-                  const qRiskInfo = getCryptavistaQuantumRisk(item);
-                  const riskCfg = RISK_CONFIG[qRiskInfo.risk] || RISK_CONFIG.UNKNOWN;
-                  const isPqc = qRiskInfo.classification === 'Quantum Safe';
-                  const displayReason = qRiskInfo.reason
-                    ? qRiskInfo.reason
-                        .replace(/Classical Risk is High\/Legacy; /gi, '')
-                        .replace(/classical legacy cipher/gi, 'classical cipher')
-                        .replace(/Legacy \/ High/gi, 'Standard')
-                    : '';
+                  const norm = classifyAsset(item);
+                  const qClass = norm.quantumClassification;
+                  const isSafe = qClass === 'Quantum Safe';
+                  const isVuln = qClass === 'Quantum Vulnerable';
+                  const isWeak = qClass === 'Quantum-Weakened';
+
+                  const badgeClass = isSafe
+                    ? 'bg-emerald-50 text-emerald-800 border-emerald-300'
+                    : isVuln
+                      ? 'bg-red-50 text-red-800 border-red-300'
+                      : isWeak
+                        ? 'bg-amber-50 text-amber-800 border-amber-300'
+                        : 'bg-slate-50 text-slate-700 border-slate-300';
+
+                  const riskHex = norm.quantumRisk === 'High' ? '#DC2626' : norm.quantumRisk === 'Medium' ? '#D97706' : norm.quantumRisk === 'Low' ? '#16A34A' : '#64748B';
 
                   return (
-                    <div key={item.assetId || idx} className="bg-white p-5 hover:bg-[#fafbfc] transition-colors">
+                    <div key={norm.assetId || idx} className="bg-white p-5 hover:bg-[#fafbfc] transition-colors">
                       <div className="flex items-start gap-4">
                         {/* Status Icon */}
                         <div
                           className="w-10 h-10 rounded-lg flex items-center justify-center flex-shrink-0 border"
                           style={{
-                            backgroundColor: `${riskCfg.hex}15`,
-                            borderColor: `${riskCfg.hex}40`
+                            backgroundColor: `${riskHex}15`,
+                            borderColor: `${riskHex}40`
                           }}
                         >
-                          {qRiskInfo.risk === 'HIGH' ? (
-                            <AlertCircle size={18} style={{ color: riskCfg.hex }} />
-                          ) : qRiskInfo.risk === 'MEDIUM' ? (
-                            <AlertTriangle size={18} style={{ color: riskCfg.hex }} />
-                          ) : qRiskInfo.risk === 'LOW' ? (
-                            <CheckCircle2 size={18} style={{ color: riskCfg.hex }} />
+                          {norm.quantumRisk === 'High' ? (
+                            <AlertCircle size={18} style={{ color: riskHex }} />
+                          ) : norm.quantumRisk === 'Medium' ? (
+                            <AlertTriangle size={18} style={{ color: riskHex }} />
+                          ) : norm.quantumRisk === 'Low' ? (
+                            <CheckCircle2 size={18} style={{ color: riskHex }} />
                           ) : (
-                            <HelpCircle size={18} style={{ color: riskCfg.hex }} />
+                            <HelpCircle size={18} style={{ color: riskHex }} />
                           )}
                         </div>
 
@@ -299,33 +188,31 @@ export default function Classification({ selectedAnalysisId, onSelectAnalysis, a
                           <div className="flex items-center gap-2 mb-2 flex-wrap">
                             <span className="text-[13px] font-bold text-[#1a1d23]">{currentAnalysis?.applicationName}</span>
                             <span className="text-[#6b7589] text-[12px]">·</span>
-                            <span className="text-[13px] font-semibold font-mono text-[#1e3a5f]">{item.assetName}</span>
+                            <span className="text-[13px] font-semibold font-mono text-[#1e3a5f]">{norm.assetName}</span>
 
-                            {/* CBOMKit Original Classification - Neutral Badge */}
-                            <span className="inline-flex items-center gap-1 text-[10px] font-semibold border px-2 py-0.5 rounded-full bg-slate-100 text-slate-700 border-slate-300">
-                              <span className="text-slate-400 uppercase tracking-wider text-[9px]">CBOM:</span>
-                              {cbomkit.label}
+                            {/* Authoritative Quantum Classification Badge */}
+                            <span className={`inline-flex items-center gap-1 text-[11px] font-bold border px-2.5 py-0.5 rounded-full ${badgeClass}`}>
+                              {isSafe ? (
+                                <ShieldCheck size={12} className="text-emerald-600" />
+                              ) : isVuln ? (
+                                <ShieldAlert size={12} className="text-red-600" />
+                              ) : (
+                                <AlertTriangle size={12} className="text-amber-600" />
+                              )}
+                              <span>{qClass}</span>
                             </span>
 
-                            {/* Recognized PQC Quantum Classification Badge */}
-                            {isPqc && (
-                              <span className="inline-flex items-center gap-1 text-[10px] font-semibold border px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-800 border-emerald-300">
-                                <ShieldCheck size={11} className="text-emerald-600" />
-                                Quantum Classification: Quantum Safe
-                              </span>
-                            )}
-
                             {/* CRYPTAVISTA Quantum Risk Badge */}
-                            <span 
+                            <span
                               className="inline-flex items-center gap-1 text-[10px] font-bold border px-2 py-0.5 rounded-full"
                               style={{
-                                color: riskCfg.hex,
-                                backgroundColor: `${riskCfg.hex}12`,
-                                borderColor: `${riskCfg.hex}40`
+                                color: riskHex,
+                                backgroundColor: `${riskHex}12`,
+                                borderColor: `${riskHex}40`
                               }}
                             >
-                              <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: riskCfg.hex }}></span>
-                              Quantum Risk: {riskCfg.label} {qRiskInfo.score !== null ? `(${qRiskInfo.score})` : ''}
+                              <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: riskHex }}></span>
+                              Quantum Risk: {norm.quantumRisk === 'Unknown' ? 'Unknown / Review' : norm.quantumRisk} {norm.quantumRiskScore !== null ? `(${norm.quantumRiskScore})` : '(-)'}
                             </span>
                           </div>
 
@@ -336,18 +223,18 @@ export default function Classification({ selectedAnalysisId, onSelectAnalysis, a
                               <div className="text-[9px] text-[#6b7589] uppercase tracking-wide font-semibold mb-0.5">
                                 Asset Type / Primitive
                               </div>
-                              <div className="text-[12px] font-semibold text-[#1a1d23] truncate" title={`${item.assetType} - ${item.primitive}`}>
-                                {item.assetType || 'N/A'} <span className="text-[#6b7589] font-normal">· {item.primitive || '-'}</span>
+                              <div className="text-[12px] font-semibold text-[#1a1d23] truncate" title={`${norm.assetType} - ${norm.primitive}`}>
+                                {norm.assetType || 'N/A'} <span className="text-[#6b7589] font-normal">· {norm.primitive || '-'}</span>
                               </div>
                             </div>
 
-                            {/* Card 2: CBOMKit Original Classification */}
+                            {/* Card 2: Authoritative Classification */}
                             <div className="bg-[#f5f6f8] rounded-md px-3 py-2 border border-[#eaecee]">
                               <div className="text-[9px] text-[#6b7589] uppercase tracking-wide font-semibold mb-0.5">
-                                CBOM Classification
+                                Quantum Classification
                               </div>
-                              <div className="text-[12px] font-semibold text-slate-700 truncate" title={cbomkit.label}>
-                                {cbomkit.label}
+                              <div className="text-[12px] font-bold truncate" style={{ color: isSafe ? '#16A34A' : isVuln ? '#DC2626' : isWeak ? '#D97706' : '#64748B' }}>
+                                {qClass}
                               </div>
                             </div>
 
@@ -356,11 +243,11 @@ export default function Classification({ selectedAnalysisId, onSelectAnalysis, a
                               <div className="text-[9px] text-[#6b7589] uppercase tracking-wide font-semibold mb-0.5">
                                 Quantum Risk & Score
                               </div>
-                              <div className="text-[12px] font-bold flex items-center gap-1.5" style={{ color: riskCfg.hex }}>
-                                <span className="w-2 h-2 rounded-full" style={{ backgroundColor: riskCfg.hex }}></span>
-                                <span>{riskCfg.label}</span>
+                              <div className="text-[12px] font-bold flex items-center gap-1.5" style={{ color: riskHex }}>
+                                <span className="w-2 h-2 rounded-full" style={{ backgroundColor: riskHex }}></span>
+                                <span>{norm.quantumRisk === 'Unknown' ? 'Unknown / Review' : norm.quantumRisk}</span>
                                 <span className="text-[11px] font-semibold text-gray-600">
-                                  {qRiskInfo.score !== null ? `· Score: ${qRiskInfo.score}` : '· Score: —'}
+                                  {norm.quantumRiskScore !== null ? `· Score: ${norm.quantumRiskScore}` : '· Score: -'}
                                 </span>
                               </div>
                             </div>
@@ -370,17 +257,17 @@ export default function Classification({ selectedAnalysisId, onSelectAnalysis, a
                               <div className="text-[9px] text-[#6b7589] uppercase tracking-wide font-semibold mb-0.5">
                                 Location
                               </div>
-                              <div className="text-[12px] font-semibold text-gray-700 font-mono truncate" title={item.location}>
-                                {item.location || '-'}
+                              <div className="text-[12px] font-semibold text-gray-700 font-mono truncate" title={norm.sourceLocation}>
+                                {norm.sourceLocation || '-'}
                               </div>
                             </div>
                           </div>
 
                           {/* Technical Reason */}
-                          {displayReason && (
+                          {norm.quantumRiskReason && (
                             <div className="mt-2.5 text-[11px] text-[#556070] bg-[#f9fafb] border border-[#eef0f3] rounded px-3 py-1.5 flex items-center gap-1.5">
                               <Cpu size={12} className="text-[#8892a0] shrink-0" />
-                              <span className="leading-tight">{displayReason}</span>
+                              <span className="leading-tight">{norm.quantumRiskReason}</span>
                             </div>
                           )}
                         </div>

@@ -24,7 +24,7 @@ const upload = multer({ dest: 'uploads/' });
 router.post('/', upload.single('file'), async (req: Request, res: Response): Promise<void> => {
   try {
     const { applicationName, dataSensitivity, businessCriticality, dataProtectionDuration, runtimeEnabled, repositoryUrl, threatHorizonYear, migrationDuration, targetType, branch, commit } = req.body;
-    
+
     if (!applicationName) {
       res.status(400).json({ error: 'applicationName is required' });
       return;
@@ -149,8 +149,8 @@ router.get('/:id/status', async (req: Request, res: Response): Promise<void> => 
     res.status(404).json({ error: 'Analysis not found' });
     return;
   }
-  res.json({ 
-    status: analysis.status, 
+  res.json({
+    status: analysis.status,
     currentStage: analysis.currentStage,
     stages: analysis.stages,
     errorMessage: analysis.errorMessage,
@@ -188,7 +188,7 @@ router.get('/:id/cbom', async (req: Request, res: Response): Promise<void> => {
     `http://localhost:8081/api/v1/cbom/${encodeURIComponent(String(req.params.id))}`,
     cbom.rawJson,
     { headers: { 'Content-Type': 'application/json' }, timeout: 2000 }
-  ).catch(() => {});
+  ).catch(() => { });
   res.json(cbom.rawJson);
 });
 
@@ -196,7 +196,7 @@ router.get('/:id/cbom', async (req: Request, res: Response): Promise<void> => {
 router.get('/:id/cbom-summary', async (req: Request, res: Response): Promise<void> => {
   let cbom = await Cbom.findOne({ analysisId: req.params.id });
   let assets = await CryptoAsset.find({ analysisId: req.params.id });
-  
+
   if (!cbom && assets.length === 0) {
     const analysisDoc = await Analysis.findById(req.params.id).catch(() => null);
     if (analysisDoc) {
@@ -220,12 +220,27 @@ router.get('/:id/cbom-summary', async (req: Request, res: Response): Promise<voi
   let notApplicable = 0;
   let notQuantumSafe = 0;
   let quantumSafe = 0;
+  let quantumVulnerable = 0;
+  let quantumWeakened = 0;
 
   for (const a of assets) {
-    if (a.cbomKitClassification === 'Quantum Safe') quantumSafe++;
-    else if (a.cbomKitClassification === 'Not Quantum Safe') notQuantumSafe++;
-    else if (a.cbomKitClassification === 'Not Applicable') notApplicable++;
-    else unknown++;
+    const c = a.cbomKitClassification;
+    const qClass = (a as any).cryptavistaQuantumClassification;
+    const alg = (a.algorithm || a.assetName || '').toUpperCase();
+    const isPqc = /ML-KEM|MLKEM|ML-DSA|MLDSA|SLH-DSA|SLHDSA|KYBER|DILITHIUM|FALCON|SPHINCS/i.test(alg);
+    const isSym = /AES|CHACHA|DES|3DES|RC4|BLAKE|SHA|MD5/i.test(alg) || (a as any).category === 'symmetric' || a.primitive === 'block-cipher' || a.primitive === 'hash';
+
+    if (isPqc || c === 'Quantum Safe' || qClass === 'QUANTUM_SAFE') {
+      quantumSafe++;
+    } else if (isSym) {
+      quantumWeakened++;
+      notApplicable++;
+    } else if (c === 'Not Quantum Safe' || qClass === 'NOT_QUANTUM_SAFE' || /RSA|ECDSA|ECDH|ECC|DIFFIE/i.test(alg)) {
+      quantumVulnerable++;
+      notQuantumSafe++;
+    } else {
+      unknown++;
+    }
   }
 
   const summary = {
@@ -234,19 +249,21 @@ router.get('/:id/cbom-summary', async (req: Request, res: Response): Promise<voi
     notApplicable,
     notQuantumSafe,
     quantumSafe,
+    quantumVulnerable,
+    quantumWeakened,
     complianceStatus: cbom?.cbomSummary?.complianceStatus || 'completed'
   };
 
   res.json(summary);
 });
 
-// Get discovered assets — sorted by asset name then location for consistent table order
+// Get discovered assets - sorted by asset name then location for consistent table order
 router.get('/:id/assets', async (req: Request, res: Response): Promise<void> => {
   const assets = await CryptoAsset.find({ analysisId: req.params.id }).sort({ assetName: 1, location: 1 });
   res.json(assets);
 });
 
-// Re-process stored CBOM JSON or re-scan extracted disk directory — useful to apply parser/scanner fixes to existing data
+// Re-process stored CBOM JSON or re-scan extracted disk directory - useful to apply parser/scanner fixes to existing data
 router.post('/:id/reprocess', async (req: Request, res: Response): Promise<void> => {
   try {
     const analysisId = String(req.params.id);
@@ -278,13 +295,13 @@ router.post('/:id/reprocess', async (req: Request, res: Response): Promise<void>
     const count = await CbomkitAdapter.processOfficialCbom(analysisId, cbomJson);
     await Analysis.updateOne(
       { analysisId },
-      { 
-        $set: { 
-          'stages.discover.assetCount': count, 
+      {
+        $set: {
+          'stages.discover.assetCount': count,
           detectedCryptoAssetCount: count,
           status: 'COMPLETED',
           'stages.discover.status': 'COMPLETED'
-        } 
+        }
       }
     );
     res.json({ success: true, assetCount: count, detectedCryptoAssetCount: count });
@@ -313,7 +330,7 @@ router.put('/assets/:id/classification', async (req: Request, res: Response): Pr
 router.put('/:id/classification', async (req: Request, res: Response): Promise<void> => {
   try {
     const { dataProtectionDuration, businessCriticality, dataSensitivity } = req.body;
-    
+
     let critNum = 3;
     let critStr = 'High';
     if (typeof businessCriticality === 'number') {
@@ -337,13 +354,13 @@ router.put('/:id/classification', async (req: Request, res: Response): Promise<v
     const durationNum = parseInt(String(dataProtectionDuration), 10) || 5;
 
     await Analysis.updateOne(
-      { analysisId: req.params.id }, 
-      { 
-        $set: { 
+      { analysisId: req.params.id },
+      {
+        $set: {
           dataProtectionDuration: durationNum,
           businessCriticality: critNum,
           dataSensitivity: sensNum
-        } 
+        }
       }
     );
 
@@ -389,7 +406,7 @@ router.put('/:id/horizon', async (req: Request, res: Response): Promise<void> =>
     if (migrationDuration !== undefined) updateDoc.migrationDuration = Number(migrationDuration);
 
     await Analysis.updateOne(
-      { analysisId: req.params.id }, 
+      { analysisId: req.params.id },
       { $set: updateDoc }
     );
     res.json({ success: true, threatHorizonYear: horizonYear, quantumRiskHorizon: z });
@@ -400,9 +417,9 @@ router.put('/:id/horizon', async (req: Request, res: Response): Promise<void> =>
 
 // Scoring logic helpers
 const getQuantumRiskInfo = (
-  assetType: string, 
-  primitive: string, 
-  algorithm: string, 
+  assetType: string,
+  primitive: string,
+  algorithm: string,
   assetName?: string,
   dependsOn?: string[],
   existingRisk?: {
@@ -426,11 +443,11 @@ const getQuantumRiskInfo = (
 
   if (is3Des || isRc4 || isDes) {
     const cipherName = is3Des ? '3DES' : isRc4 ? 'RC4' : 'DES';
-    const vulnDesc = is3Des 
+    const vulnDesc = is3Des
       ? 'Sweet32 64-bit block collision vulnerability and NIST SP 800-131A Rev. 2 deprecation'
-      : isRc4 
-      ? 'keystream statistical bias vulnerabilities and RFC 7465 prohibition'
-      : 'inadequate 56-bit key length and exhaustive key-search vulnerability';
+      : isRc4
+        ? 'keystream statistical bias vulnerabilities and RFC 7465 prohibition'
+        : 'inadequate 56-bit key length and exhaustive key-search vulnerability';
 
     return {
       risk: 'Unknown',
@@ -544,12 +561,12 @@ const getQuantumRiskInfo = (
     }
 
     if (!parentAlgName && CryptavistaClassifier.isGenericKeyLabel(effectiveAlg)) {
-      return { 
-        risk: 'Unknown', 
-        score: null, 
-        notApplicable: false, 
-        isUnknown: true, 
-        reason: 'Generic key material without verifiable parent algorithm association in CBOM evidence.' 
+      return {
+        risk: 'Unknown',
+        score: null,
+        notApplicable: false,
+        isUnknown: true,
+        reason: 'Generic key material without verifiable parent algorithm association in CBOM evidence.'
       };
     }
   }
@@ -585,7 +602,7 @@ const getQuantumRiskInfo = (
       notApplicable: false,
       isUnknown: match.score === null,
       isContextDependent: false,
-      reason: isInherited 
+      reason: isInherited
         ? `${rawName} inherits ${displayRisk} quantum risk (${match.score}) from associated algorithm ${parentAlgName}.`
         : match.reason
     };
@@ -603,13 +620,13 @@ const getQuantumRiskInfo = (
     };
   }
 
-  return { 
-    risk: 'Unknown', 
-    score: null, 
-    notApplicable: false, 
-    isUnknown: true, 
+  return {
+    risk: 'Unknown',
+    score: null,
+    notApplicable: false,
+    isUnknown: true,
     isContextDependent: false,
-    reason: 'Cryptographic primitive or algorithm could not be determined from the available CBOM data.' 
+    reason: 'Cryptographic primitive or algorithm could not be determined from the available CBOM data.'
   };
 };
 
@@ -767,7 +784,7 @@ function computeDependencyMetrics(cbomJson: any, assets: any[]) {
       totalComponents: totalLogicalNodes,
       dependencyReach: Number(reach.toFixed(1)),
       dependencyImpactScore: impactScore,
-      calculation: hasDependencyEvidence 
+      calculation: hasDependencyEvidence
         ? `(${affectedCount} affected / ${totalLogicalNodes} total) × 100 = ${reach.toFixed(1)}% → Dependency Impact Score: ${impactScore}`
         : "No dependency relationship evidence was reported by the available static analysis."
     });
@@ -786,16 +803,16 @@ function computeDependencyMetrics(cbomJson: any, assets: any[]) {
 router.get('/scored/applications', async (req: Request, res: Response): Promise<void> => {
   const analyses = await Analysis.find().sort({ createdAt: -1 });
   const result = [];
-  
+
   for (const app of analyses) {
     const assets = await CryptoAsset.find({ analysisId: app.analysisId });
 
     const sensScore = getSensitivityValue(app.dataSensitivity);
     const critScore = getCriticalityValue(app.businessCriticality);
-    
+
     const X = typeof app.dataProtectionDuration === 'number' ? app.dataProtectionDuration : 5;
-    const Y = typeof app.migrationDuration === 'number' ? app.migrationDuration : 2; 
-    
+    const Y = typeof app.migrationDuration === 'number' ? app.migrationDuration : 2;
+
     // Threat Horizon Year: default 2036, Reference Year: 2026 => Z = 10 years
     let threatHorizonYear = app.threatHorizonYear || 2036;
     let Z = 10;
@@ -885,7 +902,7 @@ router.get('/:id/summary', async (req: Request, res: Response): Promise<void> =>
       let priorityScore: number | null = null;
       let isPartial = false;
       let priorityClassification = 'Unavailable';
-      let action = 'Score unavailable — insufficient evidence';
+      let action = 'Score unavailable - insufficient evidence';
 
       if (typeof qrInfo.score === 'number' && typeof depScore === 'number') {
         priorityScore = Number(((qrInfo.score + depScore) / 2).toFixed(1));
@@ -967,7 +984,7 @@ router.get('/:id/summary', async (req: Request, res: Response): Promise<void> =>
         location: nodeData.locations[0] || sampleAsset?.location || '',
         locations: nodeData.locations,
         occurrencesCount: nodeData.occurrencesCount,
-        quantumRisk: qrInfo.risk,
+        quantumRisk: qrInfo.risk === 'Unknown' ? 'Unknown / Review' : qrInfo.risk,
         quantumRiskScore: qrInfo.score,
         quantumRiskReason: qrInfo.reason,
         isNotApplicable: qrInfo.notApplicable,
@@ -1138,9 +1155,9 @@ router.get('/:id/scored-assets', async (req: Request, res: Response): Promise<vo
     } : undefined;
     const keyEvidence = sampleAsset?.keySize || (sampleAsset?.version && !isNaN(Number(sampleAsset.version)) ? Number(sampleAsset.version) : undefined);
     const qrInfo = getQuantumRiskInfo(
-      nodeData.assetType, 
-      nodeData.primitive, 
-      nodeData.algorithm || sampleAsset?.algorithm || name, 
+      nodeData.assetType,
+      nodeData.primitive,
+      nodeData.algorithm || sampleAsset?.algorithm || name,
       name,
       nodeData.dependsOnList,
       existingRisk,
@@ -1150,12 +1167,12 @@ router.get('/:id/scored-assets', async (req: Request, res: Response): Promise<vo
 
     // Rules from Section 11, 12, 13, 14:
     // If both values exist: CPS = (QRS + DIS) / 2
-    // If only one value exists: CPS = available score, labeled "Partial CPS — based on available evidence"
+    // If only one value exists: CPS = available score, labeled "Partial CPS - based on available evidence"
     // If neither exists: CPS = null, labeled "Unavailable"
     let priorityScore: number | null = null;
     let isPartial = false;
     let priorityClassification = 'Unavailable';
-    let action = 'Score unavailable — insufficient evidence';
+    let action = 'Score unavailable - insufficient evidence';
 
     if (typeof qrInfo.score === 'number' && typeof depScore === 'number') {
       priorityScore = Number(((qrInfo.score + depScore) / 2).toFixed(1));
@@ -1199,8 +1216,8 @@ router.get('/:id/scored-assets', async (req: Request, res: Response): Promise<vo
       isNonNumeric: priorityScore === null,
       scores: {
         quantumRisk: qrInfo.score,
-        quantumRiskClassification: qrInfo.risk,
-        quantumRiskText: qrInfo.score !== null ? `${qrInfo.risk} (${qrInfo.score})` : 'Unavailable',
+        quantumRiskClassification: qrInfo.risk === 'Unknown' ? 'Unknown / Review' : qrInfo.risk,
+        quantumRiskText: qrInfo.score !== null ? `${qrInfo.risk} (${qrInfo.score})` : 'Unknown / Review (-)',
         quantumRiskReason: qrInfo.reason,
         dependencyImpact: depScore,
         dependencyImpactText: depScore !== null ? `Score: ${depScore}` : 'Unavailable',
@@ -1281,9 +1298,9 @@ router.get('/:id/recommendations', async (req: Request, res: Response): Promise<
         reason: sampleAsset.cryptavistaReason
       } : undefined;
       const qrInfo = getQuantumRiskInfo(
-        nodeData.assetType, 
-        nodeData.primitive, 
-        nodeData.algorithm || sampleAsset?.algorithm || name, 
+        nodeData.assetType,
+        nodeData.primitive,
+        nodeData.algorithm || sampleAsset?.algorithm || name,
         name,
         nodeData.dependsOnList,
         existingRisk,
@@ -1294,7 +1311,7 @@ router.get('/:id/recommendations', async (req: Request, res: Response): Promise<
       let priorityScore: number | null = null;
       let isPartial = false;
       let priorityClassification = 'Unavailable';
-      let action = 'Score unavailable — insufficient evidence';
+      let action = 'Score unavailable - insufficient evidence';
 
       if (typeof qrInfo.score === 'number' && typeof depScore === 'number') {
         priorityScore = Number(((qrInfo.score + depScore) / 2).toFixed(1));
@@ -1346,7 +1363,7 @@ router.get('/:id/recommendations', async (req: Request, res: Response): Promise<
         primitive: nodeData.primitive,
         locations: nodeData.locations,
         occurrencesCount: nodeData.occurrencesCount,
-        quantumRisk: qrInfo.risk,
+        quantumRisk: qrInfo.risk === 'Unknown' ? 'Unknown / Review' : qrInfo.risk,
         quantumRiskScore: qrInfo.score,
         quantumRiskReason: qrInfo.reason,
         isNotApplicable: qrInfo.notApplicable,
@@ -1419,9 +1436,9 @@ router.post('/:id/recommendations/:assetName/generate', async (req: Request, res
       reason: sampleAsset.cryptavistaReason
     } : undefined;
     const qrInfo = getQuantumRiskInfo(
-      nodeData.assetType, 
-      nodeData.primitive, 
-      nodeData.algorithm || sampleAsset?.algorithm || assetName, 
+      nodeData.assetType,
+      nodeData.primitive,
+      nodeData.algorithm || sampleAsset?.algorithm || assetName,
       assetName,
       nodeData.dependsOnList,
       existingRisk,
@@ -1503,7 +1520,7 @@ router.post('/:id/recommendations/:assetName/generate', async (req: Request, res
       padding: details.padding || (sampleAsset as any)?.padding || 'None',
       occurrences: nodeData.occurrencesCount ?? 1,
       locations: nodeData.locations || [],
-      quantumRisk: qrInfo.risk,
+      quantumRisk: qrInfo.risk === 'Unknown' ? 'Unknown / Review' : qrInfo.risk,
       quantumRiskScore: qrInfo.score,
       dependencyImpact: depScore !== null ? (depScore >= 75 ? 'High' : depScore >= 30 ? 'Medium' : 'Low') : 'Unavailable',
       dependencyImpactScore: depScore,
@@ -1568,7 +1585,7 @@ router.get('/:id/dependency-graph', async (req: Request, res: Response): Promise
       res.json({ available: false, elements: [], logicalAssets: [] });
       return;
     }
-    
+
     const metrics = computeDependencyMetrics(cbom.rawJson, assets);
     const elements: any[] = [];
     const logicalAssetDetails: any[] = [];
@@ -1623,8 +1640,8 @@ router.get('/:id/dependency-graph', async (req: Request, res: Response): Promise
 async function processAnalysis(analysisId: string, repositoryUrl?: string, zipFilePath?: string, targetType?: string, branch?: string, commit?: string, originalFilename?: string) {
   try {
     const updateDiscoverStage = async (status: string, extra: any = {}) => {
-      const updateData: any = { 
-        'stages.discover.status': status 
+      const updateData: any = {
+        'stages.discover.status': status
       };
       if (status === 'RUNNING') updateData['stages.discover.startedAt'] = new Date();
       if (status === 'COMPLETED') updateData['stages.discover.completedAt'] = new Date();
@@ -1633,12 +1650,12 @@ async function processAnalysis(analysisId: string, repositoryUrl?: string, zipFi
     };
 
     const setStage = async (stageName: string, status: string) => {
-      await Analysis.updateOne({ analysisId }, { 
-        $set: { 
+      await Analysis.updateOne({ analysisId }, {
+        $set: {
           currentStage: stageName.toUpperCase(),
           status: status,
           [`stages.${stageName}.status`]: 'RUNNING'
-        } 
+        }
       });
     };
 
@@ -1860,16 +1877,16 @@ async function processAnalysis(analysisId: string, repositoryUrl?: string, zipFi
       let foundCbom = null;
       let retries = 0;
       const cleanRepo = repositoryUrl ? repositoryUrl.split('/').pop()?.replace(/\.git$/i, '').toLowerCase() : '';
-      
+
       // We poll every 5 seconds for up to 15 minutes (180 retries)
       while (!cbomFound && retries < 180) {
         await new Promise(r => setTimeout(r, 5000));
         retries++;
-        
+
         try {
           const response = await axios.get('http://localhost:8081/api/v1/cbom/last/10');
           const cboms = response.data;
-          
+
           // Find a CBOM that was created AFTER this scan started, matching the target repo if available
           const recentCbom = cboms.find((c: any) => {
             const cTime = typeof c.createdAt === 'number' ? c.createdAt : new Date(c.createdAt).getTime();
@@ -1880,7 +1897,7 @@ async function processAnalysis(analysisId: string, repositoryUrl?: string, zipFi
             }
             return true;
           });
-          
+
           if (recentCbom) {
             cbomFound = true;
             foundCbom = recentCbom;
@@ -1889,11 +1906,11 @@ async function processAnalysis(analysisId: string, repositoryUrl?: string, zipFi
           console.error('Error polling CBOMKit API', err);
         }
       }
-      
+
       if (!cbomFound || !foundCbom) {
         throw new Error('Timeout waiting for CBOMKit to generate a CBOM. Please try again.');
       }
-      
+
       assetCount = await CbomkitAdapter.processOfficialCbom(analysisId, foundCbom.bom);
 
       const linesVal = foundCbom.numberOfLines || foundCbom.scanning?.numberOfLines || 0;
@@ -1908,8 +1925,8 @@ async function processAnalysis(analysisId: string, repositoryUrl?: string, zipFi
         }
       });
     }
-    
-    await updateDiscoverStage('COMPLETED', { 
+
+    await updateDiscoverStage('COMPLETED', {
       'stages.discover.assetCount': assetCount,
       detectedCryptoAssetCount: assetCount
     });
@@ -1925,10 +1942,10 @@ async function processAnalysis(analysisId: string, repositoryUrl?: string, zipFi
 
     // --- RUNTIME STAGE SIMULATION ---
     await setStage('runtime', 'RUNNING');
-    
+
     // Simulate runtime evidence collection for a few seconds
     await new Promise(r => setTimeout(r, 4000));
-    
+
     // Create dummy events to satisfy the data model
     const dummyEvents = [
       {
@@ -1955,17 +1972,17 @@ async function processAnalysis(analysisId: string, repositoryUrl?: string, zipFi
 
     await RuntimeEvent.insertMany(dummyEvents);
 
-    await Analysis.updateOne({ analysisId }, { 
-      $set: { 
+    await Analysis.updateOne({ analysisId }, {
+      $set: {
         'stages.runtime.status': 'COMPLETED',
-        status: 'COMPLETED' 
-      } 
+        status: 'COMPLETED'
+      }
     });
 
   } catch (error) {
     console.error(`Analysis ${analysisId} failed:`, error);
-    await Analysis.updateOne({ analysisId }, { 
-      status: 'FAILED', 
+    await Analysis.updateOne({ analysisId }, {
+      status: 'FAILED',
       errorMessage: (error as Error).message,
       'stages.discover.status': 'FAILED'
     });

@@ -9,9 +9,12 @@ export const CARBON_CATEGORICAL_PALETTE = [
 
 export const COMPLIANCE_COLOR_MAP: Record<string, string> = {
   "Quantum Safe": "#24a148",
-  "Not Quantum Safe": "#fac532",
-  "Not Applicable": "#8d8d8d",
-  "Unknown": "#17a9d1"
+  "Quantum Vulnerable": "#da1e28",
+  "Quantum-Weakened": "#d97706",
+  "Unknown": "#17a9d1",
+  // Legacy mappings for backward compatibility if any
+  "Not Quantum Safe": "#da1e28",
+  "Not Applicable": "#d97706"
 };
 
 export interface CbomkitChartItem {

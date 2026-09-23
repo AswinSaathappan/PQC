@@ -18,7 +18,229 @@ import {
   LabelList
 } from "recharts";
 import ApplicationSelector from "../components/ApplicationSelector";
-import CbomkitDonutChart, { CbomkitChartItem } from "../components/CbomkitDonutChart";
+import CbomkitDonutChart, { CbomkitChartItem, CARBON_CATEGORICAL_PALETTE, COMPLIANCE_COLOR_MAP } from "../components/CbomkitDonutChart";
+import { classifyAsset, calculateClassificationStats, ClassificationStats } from "../utils/quantumClassification";
+
+function renderDonutChartToImage(options: {
+  centerNumber: number | string;
+  centerLabel: string;
+  data: Array<{ group: string; value: number; color?: string }>;
+  colorPalette?: string[];
+  colorMap?: Record<string, string>;
+  width?: number;
+  height?: number;
+  title: string;
+  subtitle?: string;
+  isWide?: boolean;
+}): string {
+  const width = options.width || (options.isWide ? 1000 : 560);
+  const height = options.height || (options.isWide ? 360 : 400);
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return "";
+
+  // Fill background
+  ctx.fillStyle = "#ffffff";
+  ctx.fillRect(0, 0, width, height);
+
+  // Outer border
+  ctx.strokeStyle = "#e2e8f0";
+  ctx.lineWidth = 2;
+  ctx.strokeRect(1, 1, width - 2, height - 2);
+
+  // Title
+  ctx.fillStyle = "#1e3a5f";
+  ctx.font = "bold 18px -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif";
+  ctx.textAlign = "left";
+  ctx.textBaseline = "top";
+  ctx.fillText(options.title, 20, 16);
+
+  // Subtitle
+  if (options.subtitle) {
+    ctx.fillStyle = "#64748b";
+    ctx.font = "12px -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif";
+    ctx.fillText(options.subtitle, 20, 40);
+  }
+
+  // Divider
+  ctx.strokeStyle = "#edf2f7";
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(20, 62);
+  ctx.lineTo(width - 20, 62);
+  ctx.stroke();
+
+  const validData = options.data.filter(d => typeof d.value === "number" && d.value > 0);
+  const total = validData.reduce((acc, curr) => acc + curr.value, 0);
+
+  // Donut geometry
+  const donutCenterX = options.isWide ? 170 : 140;
+  const donutCenterY = options.isWide ? 210 : 230;
+  const outerRadius = options.isWide ? 100 : 96;
+  const innerRadius = outerRadius * 0.68;
+
+  if (total === 0) {
+    ctx.beginPath();
+    ctx.arc(donutCenterX, donutCenterY, outerRadius, 0, 2 * Math.PI);
+    ctx.arc(donutCenterX, donutCenterY, innerRadius, 0, 2 * Math.PI, true);
+    ctx.fillStyle = "#f1f5f9";
+    ctx.fill();
+
+    ctx.fillStyle = "#1e3a5f";
+    ctx.font = "bold 26px -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText("0", donutCenterX, donutCenterY - 8);
+
+    ctx.fillStyle = "#64748b";
+    ctx.font = "600 12px -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif";
+    ctx.fillText(options.centerLabel, donutCenterX, donutCenterY + 16);
+  } else {
+    let startAngle = -Math.PI / 2;
+    validData.forEach((item, idx) => {
+      const sliceAngle = (item.value / total) * 2 * Math.PI;
+      const endAngle = startAngle + sliceAngle;
+
+      let color = item.color;
+      if (!color && options.colorMap && options.colorMap[item.group]) {
+        color = options.colorMap[item.group];
+      }
+      if (!color) {
+        const palette = options.colorPalette || CARBON_CATEGORICAL_PALETTE;
+        color = palette[idx % palette.length];
+      }
+
+      ctx.beginPath();
+      ctx.arc(donutCenterX, donutCenterY, outerRadius, startAngle, endAngle);
+      ctx.arc(donutCenterX, donutCenterY, innerRadius, endAngle, startAngle, true);
+      ctx.closePath();
+      ctx.fillStyle = color;
+      ctx.fill();
+
+      // White slice separator
+      ctx.strokeStyle = "#ffffff";
+      ctx.lineWidth = 2.5;
+      ctx.stroke();
+
+      startAngle = endAngle;
+    });
+
+    // Center text
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillStyle = "#1e3a5f";
+    ctx.font = "bold 28px -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif";
+    ctx.fillText(String(options.centerNumber), donutCenterX, donutCenterY - 8);
+
+    ctx.fillStyle = "#64748b";
+    ctx.font = "600 12px -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif";
+    ctx.fillText(options.centerLabel, donutCenterX, donutCenterY + 16);
+  }
+
+  // Legend
+  ctx.textAlign = "left";
+  ctx.textBaseline = "middle";
+
+  if (options.isWide) {
+    // 2-column legend
+    const col1X = 350;
+    const col2X = 680;
+    const itemsPerCol = 6;
+    const itemsToDisplay = validData.slice(0, itemsPerCol * 2);
+
+    itemsToDisplay.forEach((item, idx) => {
+      const isCol2 = idx >= itemsPerCol;
+      const curX = isCol2 ? col2X : col1X;
+      const rowIdx = isCol2 ? idx - itemsPerCol : idx;
+      const curY = 90 + (rowIdx * 36);
+
+      let color = item.color;
+      if (!color && options.colorMap && options.colorMap[item.group]) {
+        color = options.colorMap[item.group];
+      }
+      if (!color) {
+        const palette = options.colorPalette || CARBON_CATEGORICAL_PALETTE;
+        color = palette[idx % palette.length];
+      }
+      const pct = total > 0 ? ((item.value / total) * 100).toFixed(1) + "%" : "0%";
+
+      // Color swatch
+      ctx.fillStyle = color;
+      ctx.fillRect(curX, curY - 7, 13, 13);
+      ctx.strokeStyle = "rgba(0,0,0,0.12)";
+      ctx.lineWidth = 1;
+      ctx.strokeRect(curX, curY - 7, 13, 13);
+
+      // Label
+      ctx.fillStyle = "#1e293b";
+      ctx.font = "600 13px -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif";
+      let label = item.group;
+      if (label.length > 20) label = label.slice(0, 18) + "…";
+      ctx.fillText(label, curX + 22, curY);
+
+      // Value & Percent
+      ctx.fillStyle = "#475569";
+      ctx.font = "bold 12px -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif";
+      ctx.fillText(`${item.value} (${pct})`, curX + 190, curY);
+    });
+
+    if (validData.length > itemsPerCol * 2) {
+      const remaining = validData.length - itemsPerCol * 2;
+      ctx.fillStyle = "#94a3b8";
+      ctx.font = "italic 11px -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif";
+      ctx.fillText(`+ ${remaining} more operational functions`, col2X + 22, 90 + (itemsPerCol * 36));
+    }
+  } else {
+    // 1-column legend
+    const legendX = 270;
+    const maxItems = 7;
+    const itemsToDisplay = validData.slice(0, maxItems);
+
+    itemsToDisplay.forEach((item, idx) => {
+      const curY = 92 + (idx * 36);
+
+      let color = item.color;
+      if (!color && options.colorMap && options.colorMap[item.group]) {
+        color = options.colorMap[item.group];
+      }
+      if (!color) {
+        const palette = options.colorPalette || CARBON_CATEGORICAL_PALETTE;
+        color = palette[idx % palette.length];
+      }
+      const pct = total > 0 ? ((item.value / total) * 100).toFixed(1) + "%" : "0%";
+
+      // Color swatch
+      ctx.fillStyle = color;
+      ctx.fillRect(legendX, curY - 7, 13, 13);
+      ctx.strokeStyle = "rgba(0,0,0,0.12)";
+      ctx.lineWidth = 1;
+      ctx.strokeRect(legendX, curY - 7, 13, 13);
+
+      // Label
+      ctx.fillStyle = "#1e293b";
+      ctx.font = "600 13px -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif";
+      let label = item.group;
+      if (label.length > 17) label = label.slice(0, 15) + "…";
+      ctx.fillText(label, legendX + 22, curY);
+
+      // Value & Percent
+      ctx.fillStyle = "#475569";
+      ctx.font = "bold 12px -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif";
+      ctx.fillText(`${item.value} (${pct})`, legendX + 175, curY);
+    });
+
+    if (validData.length > maxItems) {
+      const remaining = validData.length - maxItems;
+      ctx.fillStyle = "#94a3b8";
+      ctx.font = "italic 11px -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif";
+      ctx.fillText(`+ ${remaining} more items`, legendX + 22, 92 + (maxItems * 36));
+    }
+  }
+
+  return canvas.toDataURL("image/png");
+}
 
 interface Props {
   selectedAnalysisId?: string;
@@ -74,12 +296,12 @@ export default function Report({ selectedAnalysisId, analyses = [], onSelectAnal
     fetchReportData();
   }, [effectiveAnalysisId]);
 
-  const selectedApp = summaryData || analyses.find(a => a.analysisId === effectiveAnalysisId);
+  const selectedApp = summaryData || analyses.find((a: any) => a.analysisId === effectiveAnalysisId);
 
   // Transform backend data to expected report format
   const data = React.useMemo(() => {
     if (!selectedApp) return null;
-    
+
     const rawAssets = summaryData?.inventory || assets;
     const sortedAssets = [...rawAssets].sort((a: any, b: any) => {
       const scoreA = a.priorityScore ?? a.scores?.priorityScore ?? -1;
@@ -97,8 +319,8 @@ export default function Report({ selectedAnalysisId, analyses = [], onSelectAnal
     const fallbackAps = (fallbackMosca + fallbackSens + fallbackCrit) / 3;
 
     const appPriority = summaryData?.applicationPriority || {
-      dataProtectionLifetime: selectedApp.dataProtectionDuration || 5, 
-      migrationDuration: selectedApp.migrationDuration || 2, 
+      dataProtectionLifetime: selectedApp.dataProtectionDuration || 5,
+      migrationDuration: selectedApp.migrationDuration || 2,
       quantumThreatHorizon: selectedApp.threatHorizonYear || 2036,
       quantumRiskHorizon: selectedApp.quantumRiskHorizon || 10,
       timingMargin: fallbackMargin,
@@ -116,7 +338,7 @@ export default function Report({ selectedAnalysisId, analyses = [], onSelectAnal
       quantumRiskHorizon: appPriority.quantumRiskHorizon || selectedApp.quantumRiskHorizon || (appPriority.quantumThreatHorizon ? Math.max(1, appPriority.quantumThreatHorizon - 2026) : 10),
       timingMargin: appPriority.timingMargin ?? ((appPriority.quantumRiskHorizon || 10) - ((appPriority.dataProtectionLifetime || 5) + (appPriority.migrationDuration || 2)))
     };
-    
+
     return {
       analysisId: selectedApp.analysisId,
       analysisName: selectedApp.applicationName,
@@ -167,15 +389,13 @@ export default function Report({ selectedAnalysisId, analyses = [], onSelectAnal
           category = 'public_key';
         }
 
+        const norm = classifyAsset(a);
         const rawScore = a.scores?.quantumRisk !== undefined ? a.scores.quantumRisk : a.quantumRiskScore;
-        const riskScore = rawScore !== null && rawScore !== undefined ? rawScore : (category === 'public_key' ? 100 : (category === 'symmetric' && algUpper.includes('128')) ? 60 : null);
-        
-        let quantumRisk = "Unavailable";
-        if (riskScore !== null) {
-          quantumRisk = riskScore >= 80 ? "High" : riskScore >= 50 ? "Medium" : "Low";
-        } else if (a.quantumRisk && a.quantumRisk !== "Not Applicable" && a.quantumRisk !== "Context-Dependent") {
-          quantumRisk = a.quantumRisk;
-        }
+        const riskScore = norm.quantumClassification === 'Unknown'
+          ? null
+          : (norm.quantumRiskScore ?? (rawScore !== null && rawScore !== undefined ? rawScore : (category === 'public_key' ? 100 : (category === 'symmetric' && algUpper.includes('128')) ? 60 : null)));
+
+        const quantumRisk = norm.quantumRisk === 'Unknown' ? 'Unknown / Review' : norm.quantumRisk;
 
         const depImpact = a.dependencyImpactScore ?? a.scores?.dependencyImpact ?? null;
         const pScore = a.priorityScore ?? (a.scores?.priorityScore !== null && a.scores?.priorityScore !== undefined ? Number(a.scores.priorityScore.toFixed(0)) : null);
@@ -195,18 +415,21 @@ export default function Report({ selectedAnalysisId, analyses = [], onSelectAnal
         const reach = a.scores?.dependencyReach ?? a.dependencyReach ?? (depImpact !== null ? 35 : 0);
 
         return {
-          asset: a.assetName || a.algorithm || a.asset,
+          asset: norm.assetName,
           usage: usage,
           category: category,
-          algorithm: a.algorithm,
-          version: a.version || "Unknown",
-          component: a.assetType || a.component || "Unknown",
+          algorithm: norm.algorithm,
+          version: a.version || norm.keySize ? String(norm.keySize) : "Unknown",
+          component: norm.assetType,
           discoverySource: "Static Source Code",
-          location: a.location || (a.locations && a.locations[0]) || "Location Not Available",
+          location: norm.sourceLocation || "Location Not Available",
           locations: a.locations || (a.location ? [a.location] : []),
-          occurrencesCount: a.occurrencesCount ?? (a.locations ? a.locations.length : 1),
+          occurrencesCount: norm.occurrencesCount,
+          quantumClassification: norm.quantumClassification,
+          rawCbomStatus: norm.rawCbomStatus,
           quantumRisk: quantumRisk,
           riskScore: riskScore,
+          quantumRiskReason: norm.quantumRiskReason,
           migrationComplexity: 50,
           dependencyImpact: depImpact,
           directDependents: directDeps,
@@ -233,8 +456,8 @@ export default function Report({ selectedAnalysisId, analyses = [], onSelectAnal
         issue: rec.why || rec.purpose || "Cryptographic mechanism requires assessment under quantum or classical threat models.",
         approach: rec.strategy || rec.recommendation || rec.replacement,
         target: rec.replacement || rec.recommendation,
-        guidance: Array.isArray(rec.implementationSteps) 
-          ? rec.implementationSteps.join(' ') 
+        guidance: Array.isArray(rec.implementationSteps)
+          ? rec.implementationSteps.join(' ')
           : (rec.guidance || rec.strategy || "Review implementation guidance per NIST standards."),
         standard: rec.standard || rec.guidance || "NIST Guidance"
       };
@@ -293,7 +516,7 @@ export default function Report({ selectedAnalysisId, analyses = [], onSelectAnal
     if (usage === "symmetric_encryption" || category === "symmetric") {
       const is128 = name.includes("128");
       return {
-        issue: is128 
+        issue: is128
           ? "AES-128 provides 128-bit classical security (reduced to ~64-bit under Grover's algorithm). Long-term data may justify a stronger margin."
           : "Symmetric cipher provides quantum resistance against Grover's algorithm with sufficient key length. No PQC replacement required.",
         approach: is128
@@ -343,8 +566,8 @@ export default function Report({ selectedAnalysisId, analyses = [], onSelectAnal
       .filter(a => a.priority === "Urgent" || a.priorityClassification === "Urgent")
       .sort((a, b) => (b.priorityScore ?? -1) - (a.priorityScore ?? -1));
     const phase2 = data.discoveredAssets
-      .filter(a => 
-        a.priority === "High" || a.priorityClassification === "High" || 
+      .filter(a =>
+        a.priority === "High" || a.priorityClassification === "High" ||
         a.priority === "Monitor" || a.priorityClassification === "Monitor"
       )
       .sort((a, b) => (b.priorityScore ?? -1) - (a.priorityScore ?? -1));
@@ -413,39 +636,22 @@ export default function Report({ selectedAnalysisId, analyses = [], onSelectAnal
   }, [cbomRawData, data]);
 
   const cbomStats = React.useMemo(() => {
-    // 1. Compliance / Crypto Assets
-    const totalOccurrences = cbomSummaryData?.totalCryptoAssets ?? (summaryData?.aggregates?.totalOccurrences ?? data?.totalOccurrences ?? 0);
-    let unknown = cbomSummaryData?.unknown ?? 0;
-    let notApplicable = cbomSummaryData?.notApplicable ?? 0;
-    let notQuantumSafe = cbomSummaryData?.notQuantumSafe ?? 0;
-    // IMPORTANT: Never derive Quantum Safe from (Total - NA - NQS). Only count explicit Quantum Safe classifications.
-    let quantumSafe = typeof cbomSummaryData?.quantumSafe === 'number' ? cbomSummaryData.quantumSafe : 0;
+    // 1. Authoritative Quantum Classification Stats (Single Source of Truth)
+    const assetList = (data && data.discoveredAssets && data.discoveredAssets.length > 0)
+      ? data.discoveredAssets
+      : (assets && assets.length > 0 ? assets : []);
 
-    // Fallback tally across assets if cbomSummaryData not yet returned
-    if (!cbomSummaryData && assets.length > 0) {
-      unknown = 0;
-      notApplicable = 0;
-      notQuantumSafe = 0;
-      quantumSafe = 0;
-      assets.forEach((a: any) => {
-        const weight = a.occurrencesCount || (a.locations ? a.locations.length : 1);
-        const c = a.cbomKitClassification || a.cbomkitClassification;
-        if (c === 'Quantum Safe' || c === 'quantum-safe' || c === 'quantum_safe') {
-          quantumSafe += weight;
-        } else if (c === 'Not Quantum Safe' || c === 'quantum-vulnerable' || c === 'quantum_vulnerable') {
-          notQuantumSafe += weight;
-        } else if (c === 'Not Applicable' || c === 'na' || c === 'not-applicable') {
-          notApplicable += weight;
-        } else {
-          unknown += weight;
-        }
-      });
-    }
+    const stats = calculateClassificationStats(assetList);
+    const totalOccurrences = stats.totalOccurrences || cbomSummaryData?.totalCryptoAssets || (summaryData?.aggregates?.totalOccurrences ?? data?.totalOccurrences ?? 0);
+    const quantumSafe = stats.quantumSafe;
+    const quantumVulnerable = stats.quantumVulnerable;
+    const quantumWeakened = stats.quantumWeakened;
+    const unknown = stats.unknown;
 
     const complianceData: CbomkitChartItem[] = [
       { group: "Quantum Safe", value: quantumSafe },
-      { group: "Not Quantum Safe", value: notQuantumSafe },
-      { group: "Not Applicable", value: notApplicable },
+      { group: "Quantum Vulnerable", value: quantumVulnerable },
+      { group: "Quantum-Weakened", value: quantumWeakened },
       { group: "Unknown", value: unknown }
     ];
 
@@ -519,9 +725,12 @@ export default function Report({ selectedAnalysisId, analyses = [], onSelectAnal
       complianceData,
       totalCryptoAssets: totalOccurrences,
       unknown,
-      notApplicable,
-      notQuantumSafe,
+      quantumWeakened,
+      quantumVulnerable,
       quantumSafe,
+      stats,
+      notApplicable: quantumWeakened,
+      notQuantumSafe: quantumVulnerable,
       primitiveData,
       primitiveCount: primitiveData.length,
       functionsData,
@@ -537,52 +746,87 @@ export default function Report({ selectedAnalysisId, analyses = [], onSelectAnal
     try {
       const doc = new jsPDF();
       const phases = getPhases();
-      
+
+      // Render existing Report charts to images using exact cbomStats
+      const chartAImg = renderDonutChartToImage({
+        centerNumber: cbomStats.totalCryptoAssets,
+        centerLabel: "Crypto Assets",
+        data: cbomStats.complianceData,
+        colorMap: COMPLIANCE_COLOR_MAP,
+        title: "A. Crypto Assets (PQC Compliance)",
+        subtitle: "Post-quantum compliance distribution across all detected cryptographic assets"
+      });
+
+      const chartBImg = renderDonutChartToImage({
+        centerNumber: cbomStats.primitiveCount,
+        centerLabel: "Crypto Primitives",
+        data: cbomStats.primitiveData,
+        colorPalette: CARBON_CATEGORICAL_PALETTE,
+        title: "B. Crypto Primitives",
+        subtitle: "Distribution of detected cryptographic primitives"
+      });
+
+      const chartCImg = renderDonutChartToImage({
+        centerNumber: cbomStats.functionsCount,
+        centerLabel: "Crypto Functions",
+        data: cbomStats.functionsData,
+        colorPalette: CARBON_CATEGORICAL_PALETTE,
+        title: "C. Operational Crypto Functions",
+        subtitle: "Distribution of detected operational cryptographic functions",
+        isWide: true
+      });
+
       const addHeading = (text: string, yPos: number, level = 1) => {
         if (level === 1) {
           doc.setFont("helvetica", "bold");
-          doc.setFontSize(14);
+          doc.setFontSize(13);
           doc.setTextColor(30, 58, 95);
           doc.text(text, 14, yPos);
-          return yPos + 8;
+          return yPos + 7;
         } else {
           doc.setFont("helvetica", "bold");
-          doc.setFontSize(12);
+          doc.setFontSize(10.5);
           doc.setTextColor(50, 50, 50);
           doc.text(text, 14, yPos);
-          return yPos + 6;
+          return yPos + 5;
         }
       };
 
       const addText = (text: string, yPos: number, isBold = false) => {
         doc.setFont("helvetica", isBold ? "bold" : "normal");
-        doc.setFontSize(10);
-        doc.setTextColor(80, 80, 80);
-        const splitText = doc.splitTextToSize(text, 180);
+        doc.setFontSize(9);
+        doc.setTextColor(70, 70, 70);
+        const splitText = doc.splitTextToSize(text, 182);
         doc.text(splitText, 14, yPos);
-        return yPos + (splitText.length * 5);
+        return yPos + (splitText.length * 4.2);
       };
 
-      // Cover Page
+      // ==========================================
+      // PAGE 1: COVER & EXECUTIVE SUMMARY
+      // ==========================================
       doc.setFont("helvetica", "bold");
-      doc.setFontSize(24);
+      doc.setFontSize(22);
       doc.setTextColor(30, 58, 95);
-      doc.text("CRYPTAVISTA", 105, 100, { align: "center" });
-      doc.setFontSize(16);
+      doc.text("CRYPTAVISTA", 14, 25);
+
+      doc.setFontSize(13);
       doc.setFont("helvetica", "normal");
-      doc.text("Cryptographic Discovery & PQC Readiness Assessment", 105, 115, { align: "center" });
-      doc.setFont("helvetica", "bold");
-      doc.text(data.analysisName || "CryptaVista Application", 105, 140, { align: "center" });
-      doc.setFont("helvetica", "normal");
-      doc.setFontSize(12);
-      doc.text(`Generated On: ${new Date().toLocaleDateString()}`, 105, 160, { align: "center" });
-      doc.text(`Analysis ID: ${data.analysisId}`, 105, 167, { align: "center" });
-      doc.addPage();
-      
-      // 1. EXECUTIVE SUMMARY
-      let y = 20;
+      doc.setTextColor(70, 70, 70);
+      doc.text("Cryptographic Discovery & PQC Readiness Assessment Report", 14, 33);
+
+      doc.setFontSize(9.5);
+      doc.setTextColor(100, 100, 100);
+      doc.text(`Application: ${data.analysisName || "CryptaVista Application"}  |  Analysis ID: ${data.analysisId}  |  Date: ${new Date().toLocaleDateString()}`, 14, 41);
+      doc.text(`Runtime Analysis Status: ${data.configuration.runtimeEnabled ? "Enabled and Verified" : "Disabled (Static Analysis Only)"}`, 14, 47);
+
+      doc.setDrawColor(200, 200, 200);
+      doc.line(14, 51, 196, 51);
+
+      let y = 58;
       y = addHeading("1. EXECUTIVE SUMMARY", y);
-      const highRiskCount = summaryData?.aggregates?.quantumVulnerable ?? data.discoveredAssets.filter(a => a.quantumRisk === "High").length;
+      y = addText("Comprehensive assessment of application cryptographic posture, quantum-vulnerability exposure, and post-quantum migration priority.", y);
+      y += 2;
+
       const pubKeyCount = summaryData?.aggregates?.publicKey ?? data.discoveredAssets.filter(a => a.category === "public_key").length;
       const symCount = summaryData?.aggregates?.symmetric ?? data.discoveredAssets.filter(a => a.category === "symmetric").length;
       const hashCount = summaryData?.aggregates?.hashOrKdf ?? data.discoveredAssets.filter(a => a.category === "hash" || a.category === "kdf").length;
@@ -590,61 +834,243 @@ export default function Report({ selectedAnalysisId, analyses = [], onSelectAnal
       const execSummaryTable: string[][] = [
         ['Total Cryptographic Asset Occurrences', (cbomStats.totalCryptoAssets || data.totalOccurrences).toString()],
         ['Total Unique Logical Assets', data.uniqueLogicalAssetsCount.toString()],
-        ['Quantum-Safe Assets', cbomStats.quantumSafe.toString()],
-        ['Not Quantum-Safe Assets', cbomStats.notQuantumSafe.toString()],
-        ['Not Applicable (Symmetric / Hash)', cbomStats.notApplicable.toString()],
-        ['Unknown / Unclassified', cbomStats.unknown.toString()],
-        ['Public-Key Assets', pubKeyCount.toString()],
-        ['Symmetric Cryptographic Assets', symCount.toString()],
-        ['Hash / KDF Assets', hashCount.toString()],
-        ['Runtime Verification Status', data.configuration.runtimeEnabled ? `Enabled (${data.discoveredAssets.filter(a => a.runtimeStatus === "Observed").length} assets observed)` : 'Runtime Analysis: Disabled']
+        ['Quantum Safe (Post-Quantum Resilient)', `${cbomStats.quantumSafe} (${cbomStats.stats.quantumSafePct})`],
+        ['Quantum Vulnerable (Classical Asymmetric / Shor\'s)', `${cbomStats.quantumVulnerable} (${cbomStats.stats.quantumVulnerablePct})`],
+        ['Quantum-Weakened (Symmetric & Hashes / Grover\'s)', `${cbomStats.quantumWeakened} (${cbomStats.stats.quantumWeakenedPct})`],
+        ['Unknown (Unclassified Primitives)', `${cbomStats.unknown} (${cbomStats.stats.unknownPct})`],
+        ['Public-Key Cryptography Assets', pubKeyCount.toString()],
+        ['Symmetric Cryptography Assets', symCount.toString()],
+        ['Cryptographic Hash & KDF Assets', hashCount.toString()],
+        ['Application Priority Tier (APS)', `${data.applicationPriority.overallPriority || 'P3'} (APS: ${data.applicationPriority.aps?.toFixed(2) ?? '0.00'})`],
+        ['Runtime Verification Evidence', data.configuration.runtimeEnabled ? `Enabled (${data.discoveredAssets.filter(a => a.runtimeStatus === "Observed").length} assets observed)` : 'Disabled']
       ];
 
       autoTable(doc, {
         startY: y,
-        head: [['Executive Summary Metric', 'Assessment Finding']],
+        head: [['Assessment Metric', 'Executive Finding']],
         body: execSummaryTable,
-        headStyles: { fillColor: [245, 246, 248], textColor: [30, 58, 95] },
+        headStyles: { fillColor: [30, 58, 95], textColor: [255, 255, 255], fontStyle: 'bold' },
+        styles: { fontSize: 8.5, cellPadding: 2.8 },
+        alternateRowStyles: { fillColor: [248, 250, 252] },
         theme: 'grid'
       });
-      y = (doc as any).lastAutoTable.finalY + 15;
 
-      // 2. CBOM CRYPTOGRAPHIC INVENTORY / VISUALIZATION
-      if (y > 200) { doc.addPage(); y = 20; }
-      y = addHeading("2. CBOM CRYPTOGRAPHIC INVENTORY / VISUALIZATION", y);
-      y = addText(`CBOM Occurrences: ${cbomStats.totalCryptoAssets} total detections across ${data.uniqueLogicalAssetsCount} unique logical assets.`, y);
-      y += 4;
+      // ==========================================
+      // PAGE 2: CBOM CRYPTOGRAPHIC INVENTORY & VISUALIZATION
+      // ==========================================
+      doc.addPage();
+      y = 20;
+      y = addHeading("2. CBOM CRYPTOGRAPHIC INVENTORY & VISUALIZATION", y);
+      y = addText("Complete cryptographic inventory and distribution of detected cryptographic assets, primitives, and operational functions extracted from static CBOM analysis.", y);
+      y += 3;
 
-      const cbomInventoryTable: string[][] = [
-        ['Crypto Assets Compliance', 'Quantum Safe', cbomStats.quantumSafe.toString(), `${cbomStats.totalCryptoAssets > 0 ? ((cbomStats.quantumSafe / cbomStats.totalCryptoAssets) * 100).toFixed(1) : 0}%`],
-        ['Crypto Assets Compliance', 'Not Quantum Safe', cbomStats.notQuantumSafe.toString(), `${cbomStats.totalCryptoAssets > 0 ? ((cbomStats.notQuantumSafe / cbomStats.totalCryptoAssets) * 100).toFixed(1) : 0}%`],
-        ['Crypto Assets Compliance', 'Not Applicable', cbomStats.notApplicable.toString(), `${cbomStats.totalCryptoAssets > 0 ? ((cbomStats.notApplicable / cbomStats.totalCryptoAssets) * 100).toFixed(1) : 0}%`],
-        ['Crypto Assets Compliance', 'Unknown', cbomStats.unknown.toString(), `${cbomStats.totalCryptoAssets > 0 ? ((cbomStats.unknown / cbomStats.totalCryptoAssets) * 100).toFixed(1) : 0}%`],
-      ];
-      cbomStats.primitiveData.slice(0, 6).forEach((p) => {
-        cbomInventoryTable.push(['Cryptographic Primitives', p.group, p.value.toString(), `${cbomStats.totalCryptoAssets > 0 ? ((p.value / cbomStats.totalCryptoAssets) * 100).toFixed(1) : 0}%`]);
-      });
+      if (chartAImg && chartBImg) {
+        doc.addImage(chartAImg, "PNG", 14, y, 88, 62);
+        doc.addImage(chartBImg, "PNG", 108, y, 88, 62);
+        y += 65;
+      }
+      if (chartCImg) {
+        doc.addImage(chartCImg, "PNG", 14, y, 182, 62);
+        y += 65;
+      }
+
       autoTable(doc, {
         startY: y,
-        head: [['Inventory Domain', 'Classification / Primitive', 'Occurrences', 'Share (%)']],
-        body: cbomInventoryTable,
-        headStyles: { fillColor: [245, 246, 248], textColor: [30, 58, 95] },
+        head: [['Assessment Dimension', 'Detected Total', 'Distribution Summary', 'PQC Posture & Standard Reference']],
+        body: [
+          [
+            'Crypto Assets (Compliance)',
+            `${cbomStats.totalCryptoAssets} occurrences`,
+            `Vulnerable: ${cbomStats.quantumVulnerable} (${cbomStats.stats.quantumVulnerablePct}), Safe: ${cbomStats.quantumSafe} (${cbomStats.stats.quantumSafePct}), Weakened: ${cbomStats.quantumWeakened} (${cbomStats.stats.quantumWeakenedPct})`,
+            cbomStats.quantumVulnerable > 0 ? 'High quantum exposure - asymmetric migration required' : 'Quantum-safe baseline verified'
+          ],
+          [
+            'Cryptographic Primitives',
+            `${cbomStats.primitiveCount} types (${cbomStats.totalCryptoAssets} instances)`,
+            cbomStats.primitiveData.slice(0, 3).map(p => `${p.group}: ${p.value}`).join(', ') || 'None',
+            'Classification according to CBOM algorithm taxonomy'
+          ],
+          [
+            'Cryptographic Functions',
+            `${cbomStats.functionsCount} functional usages`,
+            cbomStats.functionsData.slice(0, 3).map(f => `${f.group}: ${f.value}`).join(', ') || 'None',
+            'Operational usage distributed across key lifecycle and protocols'
+          ]
+        ],
+        headStyles: { fillColor: [30, 58, 95], textColor: [255, 255, 255], fontStyle: 'bold' },
+        styles: { fontSize: 8, cellPadding: 2.6 },
+        columnStyles: {
+          0: { cellWidth: 48, fontStyle: 'bold' },
+          1: { cellWidth: 32, halign: 'center' },
+          2: { cellWidth: 50 },
+          3: { cellWidth: 52 }
+        },
+        alternateRowStyles: { fillColor: [248, 250, 252] },
         theme: 'grid'
       });
-      y = (doc as any).lastAutoTable.finalY + 15;
 
-      // 3. PRIORITY / RISK ANALYSIS
-      if (y > 200) { doc.addPage(); y = 20; }
-      y = addHeading("3. PRIORITY / RISK ANALYSIS", y);
-      y = addText(`Application Priority Score (APS) = ${data.applicationPriority.aps?.toFixed(2) ?? '0.00'} | Priority Tier: ${data.applicationPriority.overallPriority || 'P4'}`, y, true);
-      y = addText(`APS Formula = (Mosca Urgency: ${data.applicationPriority.moscaUrgency?.toFixed(2) ?? '0.00'} + Data Sensitivity: ${data.applicationPriority.dataSensitivity?.toFixed(2) ?? '0.00'} + Business Criticality: ${data.applicationPriority.businessCriticality?.toFixed(2) ?? '0.00'}) / 3`, y);
+      // ==========================================
+      // PAGE 3: CRYPTOGRAPHIC ASSET INVENTORY
+      // ==========================================
+      doc.addPage();
+      y = 20;
+      y = addHeading("3. CRYPTOGRAPHIC ASSET INVENTORY", y);
+      y = addText(`Authoritative inventory of detected cryptographic assets (${cbomStats.totalCryptoAssets} total occurrences across ${data.uniqueLogicalAssetsCount} unique logical primitives) extracted from static analysis and CBOM evidence.`, y);
+      y += 2;
+
+      autoTable(doc, {
+        startY: y,
+        head: [['Asset Name', 'Algorithm', 'Key / Param', 'Primitive', 'Purpose / Usage', 'Source Location', 'Occurrences']],
+        body: data.discoveredAssets.map(a => [
+          a.asset || 'Unknown',
+          a.algorithm || '-',
+          a.version && a.version !== 'Unknown' ? String(a.version) : '-',
+          a.component || a.category || '-',
+          (a.usage || 'unspecified').replace(/_/g, ' '),
+          a.location || 'Location Not Available',
+          (a.occurrencesCount || 1).toString()
+        ]),
+        headStyles: { fillColor: [30, 58, 95], textColor: [255, 255, 255], fontStyle: 'bold' },
+        styles: { fontSize: 7.8, cellPadding: 2.2 },
+        alternateRowStyles: { fillColor: [248, 250, 252] },
+        columnStyles: {
+          0: { cellWidth: 32 },
+          1: { cellWidth: 26 },
+          2: { cellWidth: 20 },
+          3: { cellWidth: 26 },
+          4: { cellWidth: 32 },
+          5: { cellWidth: 34 },
+          6: { cellWidth: 16, halign: 'center' }
+        },
+        theme: 'grid'
+      });
+
+      // ==========================================
+      // PAGE 4: QUANTUM SECURITY ASSESSMENT
+      // ==========================================
+      doc.addPage();
+      y = 20;
+      y = addHeading("4. QUANTUM SECURITY ASSESSMENT", y);
+      y = addText("Assessment of cryptographic resilience across the four standardized post-quantum classifications:", y);
+      y += 2;
+
+      const classDefinitions = [
+        "1. Quantum Safe: Standardized post-quantum cryptographic primitives (ML-KEM, ML-DSA, SLH-DSA, LMS/XMSS) resilient against known quantum cryptanalytic algorithms.",
+        "2. Quantum Vulnerable: Classical public-key algorithms (RSA, ECC, ECDSA, ECDH, DH) vulnerable to polynomial-time Shor's algorithm on a cryptanalytically relevant quantum computer (CRQC).",
+        "3. Quantum-Weakened: Symmetric ciphers (AES) and cryptographic hashes (SHA) where Grover's algorithm halves effective key strength, managed via parameter selection (e.g., AES-256) rather than algorithmic replacement.",
+        "4. Unknown: Primitives or legacy structures where evidence is insufficient to verify post-quantum resistance."
+      ];
+      classDefinitions.forEach(d => { y = addText(d, y); y += 1; });
+      y += 3;
+
+      const complianceTable: string[][] = [
+        ['Quantum Safe', cbomStats.quantumSafe.toString(), cbomStats.stats.quantumSafePct, 'Resilient against Shor\'s & Grover\'s quantum algorithms'],
+        ['Quantum Vulnerable', cbomStats.quantumVulnerable.toString(), cbomStats.stats.quantumVulnerablePct, 'Completely broken by Shor\'s algorithm on CRQC'],
+        ['Quantum-Weakened', cbomStats.quantumWeakened.toString(), cbomStats.stats.quantumWeakenedPct, 'Effective security halved by Grover\'s algorithm (upgrade key length)'],
+        ['Unknown', cbomStats.unknown.toString(), cbomStats.stats.unknownPct, 'Insufficient evidence to verify resilience']
+      ];
+
+      autoTable(doc, {
+        startY: y,
+        head: [['Classification', 'Occurrences', 'Share (%)', 'Threat Model / Impact']],
+        body: complianceTable,
+        headStyles: { fillColor: [30, 58, 95], textColor: [255, 255, 255], fontStyle: 'bold' },
+        styles: { fontSize: 8, cellPadding: 2.6 },
+        columnStyles: {
+          0: { cellWidth: 38, fontStyle: 'bold' },
+          1: { cellWidth: 24, halign: 'center' },
+          2: { cellWidth: 24, halign: 'center' },
+          3: { cellWidth: 96 }
+        },
+        alternateRowStyles: { fillColor: [248, 250, 252] },
+        theme: 'grid'
+      });
+      y = (doc as any).lastAutoTable.finalY + 8;
+
+      y = addHeading("Cryptographic Primitive Breakdown", y, 2);
+      const primTable: string[][] = cbomStats.primitiveData.map(p => [
+        p.group,
+        p.value.toString(),
+        `${cbomStats.totalCryptoAssets > 0 ? ((p.value / cbomStats.totalCryptoAssets) * 100).toFixed(1) : 0}%`
+      ]);
+
+      autoTable(doc, {
+        startY: y,
+        head: [['Cryptographic Primitive', 'Occurrences', 'Share (%)']],
+        body: primTable.length > 0 ? primTable : [['No primitives recorded', '-', '-']],
+        headStyles: { fillColor: [70, 80, 95], textColor: [255, 255, 255] },
+        styles: { fontSize: 8, cellPadding: 2.2 },
+        alternateRowStyles: { fillColor: [248, 250, 252] },
+        theme: 'grid'
+      });
+
+      // ==========================================
+      // PAGE 5: QUANTUM RISK ANALYSIS
+      // ==========================================
+      doc.addPage();
+      y = 20;
+      y = addHeading("5. QUANTUM RISK ANALYSIS", y);
+      y = addText("Detailed risk evaluation per cryptographic asset factoring algorithm vulnerability, key length, and operational deployment context.", y);
+      y += 2;
+
+      autoTable(doc, {
+        startY: y,
+        head: [['Asset', 'Classification', 'Quantum Risk', 'Risk Rationale', 'Source Location']],
+        body: data.discoveredAssets.map(a => [
+          a.asset || 'Unknown',
+          a.quantumClassification || 'Unknown',
+          a.quantumRisk || 'Unavailable',
+          a.quantumRiskReason || 'Evaluated against post-quantum threat models.',
+          a.location || 'Location Not Available'
+        ]),
+        headStyles: { fillColor: [30, 58, 95], textColor: [255, 255, 255], fontStyle: 'bold' },
+        styles: { fontSize: 7.8, cellPadding: 2.2 },
+        columnStyles: {
+          0: { cellWidth: 32 },
+          1: { cellWidth: 32 },
+          2: { cellWidth: 24, halign: 'center' },
+          3: { cellWidth: 62 },
+          4: { cellWidth: 36 }
+        },
+        alternateRowStyles: { fillColor: [248, 250, 252] },
+        theme: 'grid'
+      });
+
+      // ==========================================
+      // PAGE 6: APPLICATION PRIORITY & MOSCA ANALYSIS
+      // ==========================================
+      doc.addPage();
+      y = 20;
+      y = addHeading("6. APPLICATION PRIORITY & MOSCA ANALYSIS", y);
       const moscaMargin = data.applicationPriority.moscaVariables.timingMargin ?? (data.applicationPriority.moscaVariables.quantumRiskHorizon - (data.applicationPriority.moscaVariables.dataProtectionLifetime + data.applicationPriority.moscaVariables.migrationDuration));
-      y = addText(`Mosca Timing Margin (Z - (X + Y)) = ${moscaMargin} years (X=${data.applicationPriority.moscaVariables.dataProtectionLifetime}y, Y=${data.applicationPriority.moscaVariables.migrationDuration}y, Z=${data.applicationPriority.moscaVariables.quantumRiskHorizon}y, Horizon: ${data.applicationPriority.moscaVariables.quantumThreatHorizon})`, y);
-      y += 6;
+
+      const moscaTable: string[][] = [
+        ['X: Data Protection Lifetime', `${data.applicationPriority.moscaVariables.dataProtectionLifetime} years`],
+        ['Y: Migration Duration', `${data.applicationPriority.moscaVariables.migrationDuration} years`],
+        ['Z: Quantum Threat Horizon', `${data.applicationPriority.moscaVariables.quantumRiskHorizon} years (${data.applicationPriority.moscaVariables.quantumThreatHorizon})`],
+        ['Timing Margin (Z - (X + Y))', `${moscaMargin} years ${moscaMargin < 0 ? '- CRITICAL DEFICIT' : '- Positive margin'}`],
+        ['Mosca Urgency Score', data.applicationPriority.moscaUrgency?.toFixed(2) ?? '0.00'],
+        ['Data Sensitivity Score', data.applicationPriority.dataSensitivity?.toFixed(2) ?? '0.00'],
+        ['Business Criticality Score', data.applicationPriority.businessCriticality?.toFixed(2) ?? '0.00'],
+        ['Application Priority Score (APS)', `${data.applicationPriority.aps?.toFixed(2) ?? '0.00'} | Tier: ${data.applicationPriority.overallPriority || 'P3'}`]
+      ];
+
+      autoTable(doc, {
+        startY: y,
+        head: [['Mosca Theorem Parameter', 'Assessed Value']],
+        body: moscaTable,
+        headStyles: { fillColor: [30, 58, 95], textColor: [255, 255, 255], fontStyle: 'bold' },
+        styles: { fontSize: 8, cellPadding: 2.5 },
+        alternateRowStyles: { fillColor: [248, 250, 252] },
+        theme: 'grid'
+      });
+      y = (doc as any).lastAutoTable.finalY + 6;
+
+      y = addHeading("Component-Level Priority Ranking (CPS Table)", y, 2);
       autoTable(doc, {
         startY: y,
         head: [['Rank', 'Asset', 'Component', 'Quantum Risk', 'Complexity', 'Impact', 'Priority Score (CPS)']],
-        body: data.discoveredAssets.sort((a,b) => a.priorityRank - b.priorityRank).map(a => [
+        body: data.discoveredAssets.sort((a, b) => a.priorityRank - b.priorityRank).map(a => [
           (a.priorityRank ?? '-').toString(),
           a.asset || 'Unknown',
           a.component || 'Unknown',
@@ -653,117 +1079,169 @@ export default function Report({ selectedAnalysisId, analyses = [], onSelectAnal
           a.dependencyImpact !== null && a.dependencyImpact !== undefined ? a.dependencyImpact.toString() : 'Unavailable',
           a.priorityScore !== null && a.priorityScore !== undefined ? a.priorityScore.toString() : 'N/A'
         ]),
-        headStyles: { fillColor: [245, 246, 248], textColor: [30, 58, 95] },
+        headStyles: { fillColor: [70, 80, 95], textColor: [255, 255, 255] },
+        styles: { fontSize: 7.8, cellPadding: 2 },
+        alternateRowStyles: { fillColor: [248, 250, 252] },
         theme: 'grid'
       });
-      y = (doc as any).lastAutoTable.finalY + 15;
 
-      // 4. DEPENDENCY & BLAST RADIUS ANALYSIS
-      if (y > 200) { doc.addPage(); y = 20; }
-      y = addHeading("4. DEPENDENCY & BLAST RADIUS ANALYSIS", y);
+      // ==========================================
+      // PAGE 7: DEPENDENCY & BLAST RADIUS ANALYSIS
+      // ==========================================
+      doc.addPage();
+      y = 20;
+      y = addHeading("7. DEPENDENCY & BLAST RADIUS ANALYSIS", y);
       const totalEdges = dependencyData?.summary?.totalEdges ?? summaryData?.dependencies?.totalEdges ?? (data.discoveredAssets ? data.discoveredAssets.filter(a => a.directDependents > 0).length : 0);
-      y = addText(`Topology Metrics: ${data.totalOccurrences} occurrences across ${data.uniqueLogicalAssetsCount} unique logical components with ${totalEdges} verified dependency relationships.`, y);
-      y += 4;
+      const hasVerifiedDeps = totalEdges > 0 || data.discoveredAssets.some(a => a.hasDependencyEvidence);
+
+      if (hasVerifiedDeps) {
+        y = addText(`Topology Metrics: ${data.totalOccurrences} occurrences across ${data.uniqueLogicalAssetsCount} unique logical components with ${totalEdges} verified dependency relationships.`, y);
+      } else {
+        y = addText("Notice: Insufficient dependency data available for this application. Cryptographic dependencies could not be resolved from static call graphs or runtime telemetry. Static component nodes are cataloged below.", y);
+      }
+      y += 3;
+
+      // Summary KPI Metrics Table (3 Cards matching UI: Occurrences, Nodes, Edges)
       autoTable(doc, {
         startY: y,
-        head: [['Asset', 'Occurrences', 'Component / Usage', 'Location', 'Blast Radius (Dependents)', 'Reach (%)', 'Impact Score']],
+        head: [['Dependency Metric', 'Assessed Value', 'Scope & Architectural Interpretation']],
+        body: [
+          ['Cryptographic Asset Occurrences', (cbomStats.totalCryptoAssets || data.totalOccurrences).toString(), 'Total cryptographic algorithm instances detected across codebase layers'],
+          ['Unique Component Nodes', data.uniqueLogicalAssetsCount.toString(), 'Logical cryptographic components mapped in dependency topology'],
+          ['Verified Dependency Edges', totalEdges.toString(), 'Component-to-asset caller linkages verified via call graph analysis']
+        ],
+        headStyles: { fillColor: [70, 80, 95], textColor: [255, 255, 255], fontStyle: 'bold' },
+        styles: { fontSize: 8, cellPadding: 2.5 },
+        columnStyles: {
+          0: { cellWidth: 55, fontStyle: 'bold' },
+          1: { cellWidth: 30, halign: 'center' },
+          2: { cellWidth: 97 }
+        },
+        alternateRowStyles: { fillColor: [248, 250, 252] },
+        theme: 'grid'
+      });
+      y = (doc as any).lastAutoTable.finalY + 6;
+
+      y = addHeading("Component Discovery & Blast Radius Mapping", y, 2);
+
+      autoTable(doc, {
+        startY: y,
+        head: [['Asset', 'Occurrences', 'Component / Usage', 'Location', 'Blast Radius (Dependents)', 'Impact Score']],
         body: data.discoveredAssets.map(a => [
           a.asset || 'Unknown',
           (a.occurrencesCount || 1).toString(),
-          `${a.component || 'Unknown'} (${a.usage.replace(/_/g, ' ')})`,
+          `${a.component || 'Unknown'} (${(a.usage || '').replace(/_/g, ' ')})`,
           a.location || 'Location Not Available',
-          (a.directDependents ?? 0).toString(),
-          `${a.dependencyReach ?? 0}%`,
-          a.dependencyImpact !== null && a.dependencyImpact !== undefined ? a.dependencyImpact.toString() : 'Unavailable'
+          hasVerifiedDeps ? (a.directDependents ? `${a.directDependents} direct` : '0 direct') : 'Insufficient data',
+          a.dependencyImpact !== null && a.dependencyImpact !== undefined ? `Score: ${a.dependencyImpact}` : 'Unavailable'
         ]),
-        headStyles: { fillColor: [245, 246, 248], textColor: [30, 58, 95] },
+        headStyles: { fillColor: [30, 58, 95], textColor: [255, 255, 255], fontStyle: 'bold' },
+        styles: { fontSize: 7.8, cellPadding: 2.2 },
+        columnStyles: {
+          0: { cellWidth: 32 },
+          1: { cellWidth: 20, halign: 'center' },
+          2: { cellWidth: 40 },
+          3: { cellWidth: 42 },
+          4: { cellWidth: 28, halign: 'center' },
+          5: { cellWidth: 20, halign: 'center' }
+        },
+        alternateRowStyles: { fillColor: [248, 250, 252] },
         theme: 'grid'
       });
-      y = (doc as any).lastAutoTable.finalY + 15;
 
-      // 5. 3-PHASE MIGRATION ROADMAP
-      if (y > 220) { doc.addPage(); y = 20; }
-      y = addHeading("5. 3-PHASE MIGRATION ROADMAP", y);
-      if (phases.phase1.length > 0) {
-        y = addText("Phase 1 — Highest Priority Components (Urgent Action Required):", y, true);
-        phases.phase1.forEach(a => {
-          if (y > 270) { doc.addPage(); y = 20; }
-          y = addText(`  - ${a.asset} (${a.component}) -> Target: ${getRecommendation(a).target}`, y);
-        });
-        y+=4;
-      }
-      if (phases.phase2.length > 0) {
-        y = addText("Phase 2 — Next Priority Components (Plan & Prepare):", y, true);
-        phases.phase2.forEach(a => {
-          if (y > 270) { doc.addPage(); y = 20; }
-          y = addText(`  - ${a.asset} (${a.component}) -> Target: ${getRecommendation(a).target}`, y);
-        });
-        y+=4;
-      }
-      if (phases.phase3.length > 0) {
-        y = addText("Phase 3 — Low Priority / Monitor (Standards Compliance):", y, true);
-        phases.phase3.forEach(a => {
-          if (y > 270) { doc.addPage(); y = 20; }
-          y = addText(`  - ${a.asset} (${a.component}) -> Target: ${getRecommendation(a).target}`, y);
-        });
-        y+=8;
-      }
+      // ==========================================
+      // PAGE 8: POST-QUANTUM MIGRATION RECOMMENDATIONS
+      // ==========================================
+      doc.addPage();
+      y = 20;
+      y = addHeading("8. POST-QUANTUM MIGRATION RECOMMENDATIONS", y);
+      y = addText("Phased migration roadmap aligned with NIST Post-Quantum Cryptography standards (FIPS 203, FIPS 204, FIPS 205):", y);
+      y += 2;
 
-      // 6. MIGRATION RECOMMENDATIONS
-      doc.addPage(); y = 20;
-      y = addHeading("6. MIGRATION RECOMMENDATIONS", y);
-      data.discoveredAssets.forEach(a => {
-        const rec = getRecommendation(a);
-        if (y > 230) { doc.addPage(); y = 20; }
-        y = addHeading(`Asset: ${a.asset} (${a.component})`, y, 2);
-        y = addText(`Current Usage: ${a.usage.replace(/_/g, ' ')}`, y);
-        y = addText(`Technical Issue: ${rec.issue}`, y);
-        y = addText(`Recommended Approach: ${rec.approach}`, y);
-        y = addText(`Suggested Target: ${rec.target}`, y, true);
-        y = addText(`Implementation Guidance: ${rec.guidance}`, y);
-        y = addText(`Standard Reference: ${rec.standard}`, y);
-        y += 8;
+      y = addText(`Phase 1 - Highest Priority (Urgent Action Required): ${phases.phase1.length} assets`, y, true);
+      y = addText("  Focus: Asymmetric Shor-vulnerable public key algorithms (RSA, ECDSA). Replace with ML-KEM, ML-DSA, or SLH-DSA.", y);
+      y = addText(`Phase 2 - Next Priority (Plan & Prepare): ${phases.phase2.length} assets`, y, true);
+      y = addText("  Focus: High complexity integrations, protocol handshakes, and hybrid transition infrastructure.", y);
+      y = addText(`Phase 3 - Low Priority / Monitor (Standards Compliance): ${phases.phase3.length} assets`, y, true);
+      y = addText("  Focus: Symmetric ciphers (AES) transition to stronger 256-bit parameters and verify nonce handling. Quantum-safe assets require continuous monitoring.", y);
+      y += 4;
+
+      autoTable(doc, {
+        startY: y,
+        head: [['Asset', 'Current Usage', 'Migration Target', 'Implementation Guidance', 'Standard Reference']],
+        body: data.discoveredAssets.map(a => {
+          const rec = getRecommendation(a);
+          return [
+            a.asset || 'Unknown',
+            (a.usage || '').replace(/_/g, ' '),
+            rec.target || 'Assess Configuration',
+            rec.guidance || 'Follow NIST implementation recommendations.',
+            rec.standard || 'NIST Guidance'
+          ];
+        }),
+        headStyles: { fillColor: [30, 58, 95], textColor: [255, 255, 255], fontStyle: 'bold' },
+        styles: { fontSize: 7.5, cellPadding: 2.2 },
+        columnStyles: {
+          0: { cellWidth: 28 },
+          1: { cellWidth: 28 },
+          2: { cellWidth: 42 },
+          3: { cellWidth: 54 },
+          4: { cellWidth: 34 }
+        },
+        alternateRowStyles: { fillColor: [248, 250, 252] },
+        theme: 'grid'
       });
 
-      // 7. ASSESSMENT SUMMARY & ACTION PLAN
-      if (y > 220) { doc.addPage(); y = 20; }
-      y = addHeading("7. ASSESSMENT SUMMARY & ACTION PLAN", y);
-      y = addText("Cryptographic Inventory: Complete based on available scan data", y);
-      y = addText(`Quantum Risk: Quantum-Safe: ${cbomStats.quantumSafe} | Not Quantum-Safe: ${cbomStats.notQuantumSafe} | Not Applicable: ${cbomStats.notApplicable} | Unknown: ${cbomStats.unknown}`, y);
-      y = addText(`Runtime Verification: ${data.configuration.runtimeEnabled ? "Enabled and Completed" : "Disabled"} | Static Analysis: Completed`, y);
-      y = addText(`Phase 1 (Urgent): ${phases.phase1.length} assets | Phase 2 (Plan): ${phases.phase2.length} assets | Phase 3 (Monitor): ${phases.phase3.length} assets`, y);
-      y += 4;
-      y = addText("Recommended Workflow:", y, true);
-      const workflowSteps = [
-        "1. Address Phase 1 quantum-vulnerable public-key assets.",
-        "2. Introduce appropriate PQC or hybrid key-establishment/signature mechanisms.",
-        "3. Review Phase 2 symmetric cryptography configurations.",
-        "4. Maintain and validate Phase 3 quantum-safe / low-priority assets.",
-        "5. Re-scan the application after migration.",
-        "6. Re-evaluate dependency and blast-radius information when runtime/dependency analysis becomes available.",
-        "7. Compare the updated CBOM against this assessment to verify migration progress."
+      // ==========================================
+      // PAGE 9: ASSESSMENT METHODOLOGY & STANDARDS
+      // ==========================================
+      doc.addPage();
+      y = 20;
+      y = addHeading("9. ASSESSMENT METHODOLOGY & STANDARDS", y);
+      y = addText("CRYPTAVISTA utilizes an 8-stage assessment framework to discover, evaluate, and prioritize cryptographic assets:", y);
+      y += 2;
+
+      const methodologySteps = [
+        "1. Cryptographic Asset Discovery: Extraction of raw cryptographic assets via static binary and source scanning, runtime telemetry, and external CBOM ingestion.",
+        "2. CBOM Generation: Generation and validation of CycloneDX 1.6 Cryptographic Bill of Materials (CBOM).",
+        "3. Asset Normalization: Resolution of duplicate occurrences, identification of key material relationships, and normalization into unified cryptographic entities.",
+        "4. Algorithm Identification: Parsing primitive types, key lengths, cipher modes, and functional usage contexts.",
+        "5. Quantum Classification: Authoritative categorization into Quantum Safe, Quantum Vulnerable, Quantum-Weakened, or Unknown.",
+        "6. Quantum Risk Assessment: Evaluating susceptibility to Shor's and Grover's quantum cryptanalysis algorithms against operational threat horizons.",
+        "7. Migration Analysis: Rule-based generation of post-quantum remediation paths conforming to NIST FIPS 203, 204, 205 and SP 800 guidelines.",
+        "8. Application Prioritization: Calculating the Application Priority Score (APS) using Mosca's theorem and component-level CPS metrics."
       ];
-      workflowSteps.forEach(s => { if (y > 270) { doc.addPage(); y = 20; } y = addText(s, y); });
-      y += 8;
+      methodologySteps.forEach(s => { y = addText(s, y); y += 1; });
+      y += 3;
 
-      // 8. STANDARDS & REFERENCES
-      if (y > 220) { doc.addPage(); y = 20; }
-      y = addHeading("8. STANDARDS & REFERENCES", y, 2);
-      y = addText("- NIST FIPS 203 (ML-KEM) - Module-Lattice-Based Key-Encapsulation Mechanism Standard", y);
-      y = addText("- NIST FIPS 204 (ML-DSA) - Module-Lattice-Based Digital Signature Standard", y);
-      y = addText("- NIST FIPS 205 (SLH-DSA) - Stateless Hash-Based Digital Signature Standard", y);
-      y = addText("- NIST SP 800-208 - Recommendation for Stateful Hash-Based Signature Schemes", y);
-      y = addText("- NIST SP 800-38D - Galois/Counter Mode (GCM) for Block Cipher Algorithms", y);
-      y = addText("- RFC 9106 - Argon2 Password Hashing and Memory-Hard Function", y);
-      y = addText("- RFC 8439 - ChaCha20 and Poly1305 for IETF Protocols", y);
-      y = addText("- NIST SP 800-131A Rev. 2 - Transitioning the Use of Cryptographic Algorithms and Key Lengths", y);
+      // Prominent methodology note
+      doc.setFont("helvetica", "italic");
+      doc.setFontSize(8.5);
+      doc.setTextColor(50, 70, 100);
+      const noteBox = doc.splitTextToSize("Methodology Note: The raw CBOM provides the cryptographic inventory. CRYPTAVISTA applies an additional application-level quantum-security classification layer. The extended classification does not modify the original CBOM evidence.", 182);
+      doc.text(noteBox, 14, y);
+      y += (noteBox.length * 4.2) + 5;
 
+      y = addHeading("Applicable Standards & References", y, 2);
+      const standardsList = [
+        "- NIST FIPS 203 (ML-KEM) - Module-Lattice-Based Key-Encapsulation Mechanism Standard",
+        "- NIST FIPS 204 (ML-DSA) - Module-Lattice-Based Digital Signature Standard",
+        "- NIST FIPS 205 (SLH-DSA) - Stateless Hash-Based Digital Signature Standard",
+        "- NIST SP 800-208 - Recommendation for Stateful Hash-Based Signature Schemes",
+        "- NIST SP 800-38D - Galois/Counter Mode (GCM) for Block Cipher Algorithms",
+        "- RFC 9106 - Argon2 Password Hashing and Memory-Hard Function",
+        "- RFC 8439 - ChaCha20 and Poly1305 for IETF Protocols",
+        "- NIST SP 800-131A Rev. 2 - Transitioning the Use of Cryptographic Algorithms and Key Lengths"
+      ];
+      standardsList.forEach(std => { y = addText(std, y); y += 1; });
+
+      // Page numbering footer
       const pageCount = (doc as any).internal.getNumberOfPages();
       for (let i = 1; i <= pageCount; i++) {
         doc.setPage(i);
-        doc.setFontSize(9);
+        doc.setFontSize(8);
         doc.setTextColor(150);
-        doc.text(`Page ${i} of ${pageCount}`, 190, 290, { align: "right" });
+        doc.text(`CRYPTAVISTA Assessment Report  |  Page ${i} of ${pageCount}`, 196, 290, { align: "right" });
       }
 
       const sanitizedAppName = (data.analysisName || "Application").replace(/[^a-zA-Z0-9_-]/g, "_");
@@ -814,7 +1292,7 @@ export default function Report({ selectedAnalysisId, analyses = [], onSelectAnal
   return (
     <div className="flex-1 overflow-y-auto bg-[#ffffff]">
       <div className="max-w-[1200px] mx-auto px-6 py-8 space-y-12">
-        
+
         {/* REPORT SELECTION */}
         <div>
           <div className="flex flex-wrap justify-between items-end gap-4 mb-6">
@@ -828,7 +1306,7 @@ export default function Report({ selectedAnalysisId, analyses = [], onSelectAnal
                 selectedAnalysisId={effectiveAnalysisId}
                 onSelectAnalysis={onSelectAnalysis}
               />
-              <button 
+              <button
                 disabled={isExporting}
                 className="flex items-center gap-2 bg-[#1e3a5f] text-white px-5 py-2.5 rounded text-sm font-semibold hover:bg-[#152a44] transition-colors disabled:opacity-60 cursor-pointer shadow-2xs"
                 onClick={generatePDF}
@@ -866,7 +1344,7 @@ export default function Report({ selectedAnalysisId, analyses = [], onSelectAnal
         </div>
 
         <div className="border-t border-gray-200 pt-10 space-y-12">
-          
+
           {/* 1. EXECUTIVE SUMMARY */}
           <section>
             <h2 className="text-lg font-bold text-[#1e3a5f] mb-4 border-l-4 border-[#1e3a5f] pl-3">
@@ -892,28 +1370,28 @@ export default function Report({ selectedAnalysisId, analyses = [], onSelectAnal
                 <div className="p-3.5 bg-emerald-50/60 border border-emerald-200/80 rounded-lg">
                   <div className="text-emerald-700 mb-1 text-[11px] font-semibold leading-tight">Quantum Safe</div>
                   <div className="font-bold text-2xl text-emerald-700">{cbomStats.quantumSafe}</div>
-                  <div className="text-[10px] text-emerald-600/80 mt-0.5">Quantum-safe</div>
+                  <div className="text-[10px] text-emerald-600/80 mt-0.5">{cbomStats.stats.quantumSafePct} · Resilient</div>
                 </div>
 
-                {/* Not Quantum Safe */}
+                {/* Quantum Vulnerable */}
+                <div className="p-3.5 bg-red-50/60 border border-red-200/80 rounded-lg">
+                  <div className="text-red-800 mb-1 text-[11px] font-semibold leading-tight">Quantum Vulnerable</div>
+                  <div className="font-bold text-2xl text-red-700">{cbomStats.quantumVulnerable}</div>
+                  <div className="text-[10px] text-red-600/80 mt-0.5">{cbomStats.stats.quantumVulnerablePct} · Vulnerable</div>
+                </div>
+
+                {/* Quantum-Weakened */}
                 <div className="p-3.5 bg-amber-50/60 border border-amber-200/80 rounded-lg">
-                  <div className="text-amber-800 mb-1 text-[11px] font-semibold leading-tight">Not Quantum Safe</div>
-                  <div className="font-bold text-2xl text-amber-700">{cbomStats.notQuantumSafe}</div>
-                  <div className="text-[10px] text-amber-600/80 mt-0.5">Vulnerable</div>
-                </div>
-
-                {/* Not Applicable */}
-                <div className="p-3.5 bg-slate-50/80 border border-slate-200/80 rounded-lg">
-                  <div className="text-slate-600 mb-1 text-[11px] font-medium leading-tight">Not Applicable</div>
-                  <div className="font-bold text-2xl text-slate-700">{cbomStats.notApplicable}</div>
-                  <div className="text-[10px] text-slate-400 mt-0.5">Symmetric / Hash</div>
+                  <div className="text-amber-800 mb-1 text-[11px] font-semibold leading-tight">Quantum-Weakened</div>
+                  <div className="font-bold text-2xl text-amber-700">{cbomStats.quantumWeakened}</div>
+                  <div className="text-[10px] text-amber-600/80 mt-0.5">{cbomStats.stats.quantumWeakenedPct} · Symmetric/Hash</div>
                 </div>
 
                 {/* Unknown */}
                 <div className="p-3.5 bg-sky-50/60 border border-sky-200/80 rounded-lg">
                   <div className="text-sky-800 mb-1 text-[11px] font-medium leading-tight">Unknown</div>
                   <div className="font-bold text-2xl text-sky-800">{cbomStats.unknown}</div>
-                  <div className="text-[10px] text-sky-600/80 mt-0.5">Unclassified</div>
+                  <div className="text-[10px] text-sky-600/80 mt-0.5">{cbomStats.stats.unknownPct} · Unclassified</div>
                 </div>
 
                 {/* Public-Key */}
@@ -1063,23 +1541,23 @@ export default function Report({ selectedAnalysisId, analyses = [], onSelectAnal
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-gray-200">
-                      {data.discoveredAssets.sort((a,b) => a.priorityRank - b.priorityRank).map((a, i) => {
+                      {data.discoveredAssets.sort((a, b) => a.priorityRank - b.priorityRank).map((a, i) => {
                         const isExpanded = expandedAsset === `priority-${a.asset}`;
                         return (
                           <React.Fragment key={i}>
                             <tr className="hover:bg-gray-50 cursor-pointer" onClick={() => setExpandedAsset(isExpanded ? null : `priority-${a.asset}`)}>
                               <td className="px-4 py-3 font-semibold text-gray-500">#{a.priorityRank}</td>
                               <td className="px-4 py-3 font-semibold text-[#1e3a5f] flex items-center gap-2">
-                                {isExpanded ? <ChevronDown size={14} className="text-gray-400"/> : <ChevronRight size={14} className="text-gray-400"/>}
+                                {isExpanded ? <ChevronDown size={14} className="text-gray-400" /> : <ChevronRight size={14} className="text-gray-400" />}
                                 {a.asset}
                               </td>
                               <td className="px-4 py-3 text-gray-700">{a.component}</td>
                               <td className="px-4 py-3">
-                                <span className={`inline-block px-2 py-0.5 text-xs font-semibold rounded ${
-                                  a.quantumRisk === "High" ? "bg-red-50 text-red-700 border border-red-200" :
-                                  a.quantumRisk === "Medium" ? "bg-amber-50 text-amber-700 border border-amber-200" :
-                                  "bg-emerald-50 text-emerald-700 border border-emerald-200"
-                                }`}>
+                                <span className={`inline-block px-2 py-0.5 text-xs font-semibold rounded ${a.quantumRisk === "High" ? "bg-red-50 text-red-700 border border-red-200" :
+                                    a.quantumRisk === "Medium" ? "bg-amber-50 text-amber-700 border border-amber-200" :
+                                      a.quantumRisk === "Low" ? "bg-emerald-50 text-emerald-700 border border-emerald-200" :
+                                        "bg-slate-100 text-slate-700 border border-slate-200"
+                                  }`}>
                                   {a.quantumRisk}
                                 </span>
                               </td>
@@ -1093,7 +1571,7 @@ export default function Report({ selectedAnalysisId, analyses = [], onSelectAnal
                                     <div>
                                       <div className="text-gray-500 mb-1">Quantum Vulnerability</div>
                                       <div className="font-semibold text-gray-800">{a.quantumRisk}</div>
-                                      <div className="text-gray-400 font-mono mt-1">Score: {a.riskScore !== null && a.riskScore !== undefined ? a.riskScore : "N/A"}</div>
+                                      <div className="text-gray-400 font-mono mt-1">Score: {a.riskScore !== null && a.riskScore !== undefined ? a.riskScore : "-"}</div>
                                     </div>
                                     <div>
                                       <div className="text-gray-500 mb-1">Migration Complexity</div>
@@ -1136,7 +1614,7 @@ export default function Report({ selectedAnalysisId, analyses = [], onSelectAnal
               4. Dependency &amp; Blast Radius Analysis
             </h2>
             <div className="space-y-6">
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                 <div className="bg-white border border-gray-200 rounded-lg p-4 shadow-2xs">
                   <div className="text-xs text-gray-500 mb-1">Cryptographic Asset Occurrences</div>
                   <div className="text-2xl font-bold text-[#1e3a5f]">{data.totalOccurrences}</div>
@@ -1151,11 +1629,6 @@ export default function Report({ selectedAnalysisId, analyses = [], onSelectAnal
                   <div className="text-xs text-gray-500 mb-1">Verified Dependency Edges</div>
                   <div className="text-2xl font-bold text-indigo-900">{totalEdges}</div>
                   <div className="text-[11px] text-gray-400 mt-1">Component-to-asset linkages</div>
-                </div>
-                <div className="bg-white border border-gray-200 rounded-lg p-4 shadow-2xs">
-                  <div className="text-xs text-gray-500 mb-1">Max Dependency Reach</div>
-                  <div className="text-2xl font-bold text-amber-700">{maxReach}%</div>
-                  <div className="text-[11px] text-gray-400 mt-1">Highest blast radius across assets</div>
                 </div>
               </div>
               <div className="bg-white border border-gray-200 rounded-lg overflow-hidden shadow-2xs">
@@ -1172,7 +1645,6 @@ export default function Report({ selectedAnalysisId, analyses = [], onSelectAnal
                         <th className="px-4 py-3">Component / Usage</th>
                         <th className="px-4 py-3">Location</th>
                         <th className="px-4 py-3 text-center">Blast Radius (Dependents)</th>
-                        <th className="px-4 py-3 text-center">Reach</th>
                         <th className="px-4 py-3 text-center">Dependency Impact</th>
                       </tr>
                     </thead>
@@ -1185,11 +1657,6 @@ export default function Report({ selectedAnalysisId, analyses = [], onSelectAnal
                           <td className="px-4 py-3 text-gray-500 font-mono text-[11px] max-w-xs truncate" title={a.location}>{a.location || "Location Not Available"}</td>
                           <td className="px-4 py-3 text-center font-semibold text-gray-700">
                             {a.directDependents ? `${a.directDependents} direct` : "0 direct"}
-                          </td>
-                          <td className="px-4 py-3 text-center">
-                            <span className="font-mono text-xs font-semibold px-2 py-0.5 bg-slate-100 text-slate-700 rounded">
-                              {a.dependencyReach ?? 0}%
-                            </span>
                           </td>
                           <td className="px-4 py-3 text-center">
                             {a.dependencyImpact !== null && a.dependencyImpact !== undefined ? (
@@ -1208,7 +1675,7 @@ export default function Report({ selectedAnalysisId, analyses = [], onSelectAnal
                   </table>
                 </div>
                 <div className="p-3 bg-slate-50 border-t border-gray-100 text-[11px] text-gray-500 italic">
-                  Dependency Reach measures the propagation of changes required across callers and dependent components if this cryptographic asset is migrated or replaced.
+                  Blast radius and dependency impact measure the propagation of changes required across callers and dependent components if this cryptographic asset is migrated or replaced.
                 </div>
               </div>
             </div>
@@ -1220,19 +1687,19 @@ export default function Report({ selectedAnalysisId, analyses = [], onSelectAnal
               5. 3-Phase Migration Roadmap
             </h2>
             <div className="space-y-4">
-              {/* Phase 1 — Red / Urgent */}
+              {/* Phase 1 - Red / Urgent */}
               <div className="border border-red-200 bg-red-50/40 rounded-lg p-4">
                 <div className="flex items-center justify-between mb-2">
                   <div className="flex items-center gap-2.5">
                     <span className="w-2.5 h-2.5 rounded-full bg-red-600 shrink-0" />
-                    <h3 className="font-bold text-red-900 text-sm">Phase 1 — Highest Priority Components</h3>
+                    <h3 className="font-bold text-red-900 text-sm">Phase 1 - Highest Priority Components</h3>
                     <span className="text-[10px] font-semibold uppercase tracking-wider text-red-800 bg-red-100 border border-red-200 px-2 py-0.5 rounded">PRIORITY: URGENT</span>
                   </div>
                   <span className="text-xs font-semibold px-2 py-0.5 bg-red-100 text-red-800 border border-red-200 rounded">{phases.phase1.length} assets</span>
                 </div>
                 <div className="flex items-center gap-1.5 text-xs text-red-700 font-semibold mb-3">
                   <ShieldAlert size={13} className="text-red-600 shrink-0" />
-                  Urgent Action Required — quantum-vulnerable public-key cryptography detected
+                  Urgent Action Required - quantum-vulnerable public-key cryptography detected
                 </div>
                 <div className="space-y-2">
                   {phases.phase1.map((a, i) => (
@@ -1249,17 +1716,17 @@ export default function Report({ selectedAnalysisId, analyses = [], onSelectAnal
                 </div>
               </div>
 
-              {/* Phase 2 — Amber */}
+              {/* Phase 2 - Amber */}
               <div className="border border-amber-200 bg-amber-50/40 rounded-lg p-4">
                 <div className="flex items-center justify-between mb-2">
                   <div className="flex items-center gap-2.5">
                     <span className="w-2.5 h-2.5 rounded-full bg-amber-500 shrink-0" />
-                    <h3 className="font-bold text-amber-900 text-sm">Phase 2 — Next Priority Components</h3>
+                    <h3 className="font-bold text-amber-900 text-sm">Phase 2 - Next Priority Components</h3>
                     <span className="text-[10px] font-semibold uppercase tracking-wider text-amber-800 bg-amber-100 border border-amber-200 px-2 py-0.5 rounded">PRIORITY: HIGH</span>
                   </div>
                   <span className="text-xs font-semibold px-2 py-0.5 bg-amber-100 text-amber-800 border border-amber-200 rounded">{phases.phase2.length} assets</span>
                 </div>
-                <div className="text-xs text-amber-700 font-semibold mb-3">Plan &amp; Prepare — review symmetric cryptography configurations and key management</div>
+                <div className="text-xs text-amber-700 font-semibold mb-3">Plan &amp; Prepare - review symmetric cryptography configurations and key management</div>
                 <div className="space-y-2">
                   {phases.phase2.map((a, i) => (
                     <div key={i} className="bg-white border border-amber-100 rounded-md p-3 flex flex-col md:flex-row gap-3 justify-between shadow-2xs">
@@ -1275,17 +1742,17 @@ export default function Report({ selectedAnalysisId, analyses = [], onSelectAnal
                 </div>
               </div>
 
-              {/* Phase 3 — Green */}
+              {/* Phase 3 - Green */}
               <div className="border border-emerald-200 bg-emerald-50/40 rounded-lg p-4">
                 <div className="flex items-center justify-between mb-2">
                   <div className="flex items-center gap-2.5">
                     <span className="w-2.5 h-2.5 rounded-full bg-emerald-600 shrink-0" />
-                    <h3 className="font-bold text-emerald-950 text-sm">Phase 3 — Low Priority / Monitor</h3>
+                    <h3 className="font-bold text-emerald-950 text-sm">Phase 3 - Low Priority / Monitor</h3>
                     <span className="text-[10px] font-semibold uppercase tracking-wider text-emerald-800 bg-emerald-100 border border-emerald-200 px-2 py-0.5 rounded">PRIORITY: LOW</span>
                   </div>
                   <span className="text-xs font-semibold px-2 py-0.5 bg-emerald-100 text-emerald-800 border border-emerald-200 rounded">{phases.phase3.length} assets</span>
                 </div>
-                <div className="text-xs text-emerald-800 font-semibold mb-3">Standards Compliance — currently compliant, low migration urgency, monitor and maintain</div>
+                <div className="text-xs text-emerald-800 font-semibold mb-3">Standards Compliance - currently compliant, low migration urgency, monitor and maintain</div>
                 <div className="space-y-2">
                   {phases.phase3.map((a, i) => (
                     <div key={i} className="bg-white border border-emerald-100 rounded-md p-3 flex flex-col md:flex-row gap-3 justify-between shadow-2xs">
@@ -1317,14 +1784,14 @@ export default function Report({ selectedAnalysisId, analyses = [], onSelectAnal
                 const riskBadgeCls = p === "Urgent"
                   ? "bg-red-50 text-red-700 border border-red-200"
                   : (p === "High" || p === "Monitor")
-                  ? "bg-amber-50 text-amber-700 border border-amber-200"
-                  : p === "Low"
-                  ? "bg-emerald-50 text-emerald-700 border border-emerald-200"
-                  : "bg-gray-100 text-gray-600";
+                    ? "bg-amber-50 text-amber-700 border border-amber-200"
+                    : p === "Low"
+                      ? "bg-emerald-50 text-emerald-700 border border-emerald-200"
+                      : "bg-gray-100 text-gray-600";
                 const riskLabel = p === "Urgent" ? "HIGH RISK"
                   : (p === "High" || p === "Monitor") ? "MEDIUM"
-                  : p === "Low" ? "LOW / QUANTUM-SAFE"
-                  : "UNKNOWN";
+                    : p === "Low" ? "LOW / QUANTUM-SAFE"
+                      : "UNKNOWN";
                 return (
                   <div key={i} className="bg-white border border-gray-200 rounded-lg shadow-2xs overflow-hidden">
                     <button
@@ -1335,7 +1802,7 @@ export default function Report({ selectedAnalysisId, analyses = [], onSelectAnal
                         {isExpanded ? <ChevronDown size={15} className="text-gray-400 shrink-0" /> : <ChevronRight size={15} className="text-gray-400 shrink-0" />}
                         <div>
                           <div className="font-bold text-[#1e3a5f] text-[14px]">{a.asset}</div>
-                          <div className="text-[11px] text-gray-500 mt-0.5">{a.usage.replace(/_/g, " ")} — {a.component}</div>
+                          <div className="text-[11px] text-gray-500 mt-0.5">{a.usage.replace(/_/g, " ")} - {a.component}</div>
                         </div>
                       </div>
                       <div className="flex items-center gap-2 sm:ml-4 shrink-0">
@@ -1422,24 +1889,24 @@ export default function Report({ selectedAnalysisId, analyses = [], onSelectAnal
                 <h3 className="font-bold text-sm text-[#1e3a5f] mb-3">B. Quantum Risk Overview</h3>
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                   <div className="bg-emerald-50 border border-emerald-200 rounded-lg p-4">
-                    <div className="flex items-center gap-2 mb-1"><span className="w-2 h-2 rounded-full bg-emerald-500" /><div className="text-[11px] text-emerald-800 font-semibold">Quantum-Safe</div></div>
+                    <div className="flex items-center gap-2 mb-1"><span className="w-2 h-2 rounded-full bg-emerald-500" /><div className="text-[11px] text-emerald-800 font-semibold">Quantum Safe</div></div>
                     <div className="font-bold text-2xl text-emerald-700">{cbomStats.quantumSafe}</div>
-                    <div className="text-[10px] text-emerald-600 mt-1">occurrences</div>
+                    <div className="text-[10px] text-emerald-600 mt-1">{cbomStats.stats.quantumSafePct} · occurrences</div>
                   </div>
                   <div className="bg-red-50 border border-red-200 rounded-lg p-4">
-                    <div className="flex items-center gap-2 mb-1"><span className="w-2 h-2 rounded-full bg-red-600" /><div className="text-[11px] text-red-800 font-semibold">Not Quantum-Safe</div></div>
-                    <div className="font-bold text-2xl text-red-700">{cbomStats.notQuantumSafe}</div>
-                    <div className="text-[10px] text-red-600 mt-1">occurrences</div>
+                    <div className="flex items-center gap-2 mb-1"><span className="w-2 h-2 rounded-full bg-red-600" /><div className="text-[11px] text-red-800 font-semibold">Quantum Vulnerable</div></div>
+                    <div className="font-bold text-2xl text-red-700">{cbomStats.quantumVulnerable}</div>
+                    <div className="text-[10px] text-red-600 mt-1">{cbomStats.stats.quantumVulnerablePct} · occurrences</div>
                   </div>
-                  <div className="bg-slate-50 border border-slate-200 rounded-lg p-4">
-                    <div className="flex items-center gap-2 mb-1"><span className="w-2 h-2 rounded-full bg-slate-400" /><div className="text-[11px] text-slate-700 font-semibold">Not Applicable</div></div>
-                    <div className="font-bold text-2xl text-slate-700">{cbomStats.notApplicable}</div>
-                    <div className="text-[10px] text-slate-500 mt-1">occurrences</div>
+                  <div className="bg-amber-50 border border-amber-200 rounded-lg p-4">
+                    <div className="flex items-center gap-2 mb-1"><span className="w-2 h-2 rounded-full bg-amber-500" /><div className="text-[11px] text-amber-800 font-semibold">Quantum-Weakened</div></div>
+                    <div className="font-bold text-2xl text-amber-700">{cbomStats.quantumWeakened}</div>
+                    <div className="text-[10px] text-amber-600 mt-1">{cbomStats.stats.quantumWeakenedPct} · occurrences</div>
                   </div>
                   <div className="bg-sky-50 border border-sky-200 rounded-lg p-4">
                     <div className="flex items-center gap-2 mb-1"><span className="w-2 h-2 rounded-full bg-sky-400" /><div className="text-[11px] text-sky-800 font-semibold">Unknown</div></div>
                     <div className="font-bold text-2xl text-sky-700">{cbomStats.unknown}</div>
-                    <div className="text-[10px] text-sky-600 mt-1">occurrences</div>
+                    <div className="text-[10px] text-sky-600 mt-1">{cbomStats.stats.unknownPct} · occurrences</div>
                   </div>
                 </div>
               </div>
@@ -1450,7 +1917,7 @@ export default function Report({ selectedAnalysisId, analyses = [], onSelectAnal
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                   <div className="border border-red-200 bg-red-50/60 rounded-lg p-4 flex items-center justify-between">
                     <div>
-                      <div className="text-[11px] text-red-800 font-semibold uppercase tracking-wider mb-1">Phase 1 — Urgent</div>
+                      <div className="text-[11px] text-red-800 font-semibold uppercase tracking-wider mb-1">Phase 1 - Urgent</div>
                       <div className="font-bold text-2xl text-red-700">{phases.phase1.length}</div>
                       <div className="text-[10px] text-red-600 mt-1">assets requiring immediate action</div>
                     </div>
@@ -1458,7 +1925,7 @@ export default function Report({ selectedAnalysisId, analyses = [], onSelectAnal
                   </div>
                   <div className="border border-amber-200 bg-amber-50/60 rounded-lg p-4 flex items-center justify-between">
                     <div>
-                      <div className="text-[11px] text-amber-800 font-semibold uppercase tracking-wider mb-1">Phase 2 — Plan &amp; Prepare</div>
+                      <div className="text-[11px] text-amber-800 font-semibold uppercase tracking-wider mb-1">Phase 2 - Plan &amp; Prepare</div>
                       <div className="font-bold text-2xl text-amber-700">{phases.phase2.length}</div>
                       <div className="text-[10px] text-amber-600 mt-1">assets for review and planning</div>
                     </div>
@@ -1466,7 +1933,7 @@ export default function Report({ selectedAnalysisId, analyses = [], onSelectAnal
                   </div>
                   <div className="border border-emerald-200 bg-emerald-50/60 rounded-lg p-4 flex items-center justify-between">
                     <div>
-                      <div className="text-[11px] text-emerald-800 font-semibold uppercase tracking-wider mb-1">Phase 3 — Low Priority / Monitor</div>
+                      <div className="text-[11px] text-emerald-800 font-semibold uppercase tracking-wider mb-1">Phase 3 - Low Priority / Monitor</div>
                       <div className="font-bold text-2xl text-emerald-700">{phases.phase3.length}</div>
                       <div className="text-[10px] text-emerald-600 mt-1">assets to maintain and monitor</div>
                     </div>
@@ -1523,33 +1990,33 @@ export default function Report({ selectedAnalysisId, analyses = [], onSelectAnal
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-gray-100">
-                        {data.discoveredAssets.sort((a,b) => a.priorityRank - b.priorityRank).map((a, i) => {
+                        {data.discoveredAssets.sort((a, b) => a.priorityRank - b.priorityRank).map((a, i) => {
                           const rec = getRecommendation(a);
                           const p = a.priorityClassification || a.priority;
                           const phase = p === "Urgent"
                             ? { label: "Phase 1", cls: "text-red-700 font-semibold" }
                             : (p === "High" || p === "Monitor")
-                            ? { label: "Phase 2", cls: "text-amber-700 font-semibold" }
-                            : p === "Low"
-                            ? { label: "Phase 3", cls: "text-emerald-700 font-semibold" }
-                            : { label: "—", cls: "text-gray-400" };
+                              ? { label: "Phase 2", cls: "text-amber-700 font-semibold" }
+                              : p === "Low"
+                                ? { label: "Phase 3", cls: "text-emerald-700 font-semibold" }
+                                : { label: "-", cls: "text-gray-400" };
                           const statusBadge = p === "Urgent"
                             ? { label: "ACTION REQUIRED", cls: "bg-red-50 text-red-700 border border-red-200" }
                             : (p === "High" || p === "Monitor")
-                            ? { label: "REVIEW", cls: "bg-amber-50 text-amber-700 border border-amber-200" }
-                            : p === "Low"
-                            ? { label: "MONITOR", cls: "bg-emerald-50 text-emerald-700 border border-emerald-200" }
-                            : { label: "ANALYSIS REQUIRED", cls: "bg-gray-100 text-gray-600" };
+                              ? { label: "REVIEW", cls: "bg-amber-50 text-amber-700 border border-amber-200" }
+                              : p === "Low"
+                                ? { label: "MONITOR", cls: "bg-emerald-50 text-emerald-700 border border-emerald-200" }
+                                : { label: "ANALYSIS REQUIRED", cls: "bg-gray-100 text-gray-600" };
                           return (
                             <tr key={i} className="hover:bg-gray-50/60">
                               <td className="px-4 py-2.5 font-semibold text-[#1e3a5f]">{a.asset}</td>
                               <td className="px-4 py-2.5 text-gray-600">{a.usage.replace(/_/g, " ")}</td>
                               <td className="px-4 py-2.5">
-                                <span className={`inline-block px-1.5 py-0.5 text-[10px] font-semibold rounded ${
-                                  a.quantumRisk === "High" ? "bg-red-50 text-red-700 border border-red-200" :
-                                  a.quantumRisk === "Medium" ? "bg-amber-50 text-amber-700 border border-amber-200" :
-                                  "bg-emerald-50 text-emerald-700 border border-emerald-200"
-                                }`}>{a.quantumRisk}</span>
+                                <span className={`inline-block px-1.5 py-0.5 text-[10px] font-semibold rounded ${a.quantumRisk === "High" ? "bg-red-50 text-red-700 border border-red-200" :
+                                    a.quantumRisk === "Medium" ? "bg-amber-50 text-amber-700 border border-amber-200" :
+                                      a.quantumRisk === "Low" ? "bg-emerald-50 text-emerald-700 border border-emerald-200" :
+                                        "bg-slate-100 text-slate-700 border border-slate-200"
+                                  }`}>{a.quantumRisk}</span>
                               </td>
                               <td className={`px-4 py-2.5 text-[12px] ${phase.cls}`}>{phase.label}</td>
                               <td className="px-4 py-2.5 text-[11px] text-[#1e3a5f] font-semibold">{rec.target}</td>
@@ -1612,7 +2079,7 @@ export default function Report({ selectedAnalysisId, analyses = [], onSelectAnal
               ].map((ref, i) => (
                 <div key={i} className="bg-white border border-gray-200 rounded-lg p-4 shadow-2xs">
                   <div className="font-bold text-[#1e3a5f] text-[12px]">{ref.code}</div>
-                  {ref.name && <div className="text-[11px] font-semibold text-gray-600 mt-0.5">— {ref.name}</div>}
+                  {ref.name && <div className="text-[11px] font-semibold text-gray-600 mt-0.5">- {ref.name}</div>}
                   <div className="text-[11px] text-gray-500 mt-1.5 leading-snug">{ref.desc}</div>
                 </div>
               ))}

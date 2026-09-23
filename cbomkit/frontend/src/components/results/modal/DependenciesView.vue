@@ -9,7 +9,7 @@
           <Downstream24 style="margin-right:13px; scale: 1.1; fill: #05BE8D"/>
           <div>
             <div style="font-size: large;">
-              {{ getName(asset).toUpperCase() + "   —   " + getAssetType(asset) }}
+              {{ getName(asset).toUpperCase() + "   -   " + getAssetType(asset) }}
             </div>
             <div style="font-size: small" v-if="getBomRef(asset)">
               BOM Reference: <span class="compact-code">{{ getBomRef(asset) }}</span>
@@ -39,7 +39,7 @@
           <Upstream24 style="margin-right:13px; scale: 1.1; fill: #188A99"/>
           <div>
             <div style="font-size: large;">
-              {{ getName(asset).toUpperCase() + "   —   " + getAssetType(asset) }}
+              {{ getName(asset).toUpperCase() + "   -   " + getAssetType(asset) }}
             </div>
             <div style="font-size: small" v-if="getBomRef(asset)">
               BOM Reference: <span class="compact-code">{{ getBomRef(asset) }}</span>
@@ -69,7 +69,7 @@
           <Upstream24 style="margin-right:13px; scale: 1.1; fill: #FFBA1A"/>
           <div>
             <div style="font-size: large;">
-              {{ getName(asset).toUpperCase() + "   —   " + getAssetType(asset) }}
+              {{ getName(asset).toUpperCase() + "   -   " + getAssetType(asset) }}
             </div>
             <div style="font-size: small" v-if="getBomRef(asset)">
               BOM Reference: <span class="compact-code">{{ getBomRef(asset) }}</span>
@@ -99,7 +99,7 @@
           <Downstream24 style="margin-right:13px; scale: 1.1; fill: #FF488E"/>
           <div>
             <div style="font-size: large;">
-              {{ getName(asset).toUpperCase() + "   —   " + getAssetType(asset) }}
+              {{ getName(asset).toUpperCase() + "   -   " + getAssetType(asset) }}
             </div>
             <div style="font-size: small" v-if="getBomRef(asset)">
               BOM Reference: <span class="compact-code">{{ getBomRef(asset) }}</span>

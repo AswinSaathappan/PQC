@@ -96,6 +96,7 @@ const riskBadge: Record<string, string> = {
   Medium: "bg-amber-50 text-amber-700 border-amber-200",
   Low: "bg-emerald-50 text-emerald-700 border-emerald-200",
   Unknown: "bg-gray-50 text-gray-700 border-gray-200",
+  "Unknown / Review": "bg-gray-50 text-gray-700 border-gray-200",
 };
 
 const priorityBadge: Record<string, string> = {
@@ -133,7 +134,7 @@ export default function Recommendations({ selectedAnalysisId: propSelectedId, an
         let stored: string | null = null;
         try {
           stored = localStorage.getItem(STORAGE_KEY);
-        } catch {}
+        } catch { }
         const matched = stored ? propAnalyses.find(a => a.analysisId === stored) : null;
         const bestWithAssets = propAnalyses.find(a => ((a as any).detectedCryptoAssetCount > 0) || (a.status === 'COMPLETED' && ((a as any).stages?.discover?.assetCount || 0) > 0));
         const defaultApp = matched || bestWithAssets || propAnalyses[0];
@@ -141,7 +142,7 @@ export default function Recommendations({ selectedAnalysisId: propSelectedId, an
           setSelectedAnalysisId(defaultApp.analysisId);
           try {
             localStorage.setItem(STORAGE_KEY, defaultApp.analysisId);
-          } catch {}
+          } catch { }
         }
       }
     } else {
@@ -154,7 +155,7 @@ export default function Recommendations({ selectedAnalysisId: propSelectedId, an
               let stored: string | null = null;
               try {
                 stored = localStorage.getItem(STORAGE_KEY);
-              } catch {}
+              } catch { }
               const matched = stored ? res.data.find(a => a.analysisId === stored) : null;
               const bestWithAssets = res.data.find(a => (a.detectedCryptoAssetCount > 0) || (a.status === 'COMPLETED' && (a.stages?.discover?.assetCount || 0) > 0));
               const defaultApp = matched || bestWithAssets || res.data[0];
@@ -162,7 +163,7 @@ export default function Recommendations({ selectedAnalysisId: propSelectedId, an
                 setSelectedAnalysisId(defaultApp.analysisId);
                 try {
                   localStorage.setItem(STORAGE_KEY, defaultApp.analysisId);
-                } catch {}
+                } catch { }
               }
             }
           }
@@ -180,7 +181,7 @@ export default function Recommendations({ selectedAnalysisId: propSelectedId, an
       setSelectedAnalysisId(propSelectedId);
       try {
         localStorage.setItem(STORAGE_KEY, propSelectedId);
-      } catch {}
+      } catch { }
     }
   }, [propSelectedId]);
 
@@ -249,7 +250,7 @@ export default function Recommendations({ selectedAnalysisId: propSelectedId, an
     setSelectedAnalysisId(id);
     try {
       localStorage.setItem(STORAGE_KEY, id);
-    } catch {}
+    } catch { }
     if (onSelectAnalysis) onSelectAnalysis(id);
   };
 
@@ -300,7 +301,7 @@ export default function Recommendations({ selectedAnalysisId: propSelectedId, an
   const Y = typeof activeApp?.migrationDuration === 'number' ? activeApp.migrationDuration : 2;
   const Z = typeof activeApp?.quantumRiskHorizon === 'number' ? activeApp.quantumRiskHorizon : (activeApp?.threatHorizonYear ? Math.max(1, activeApp.threatHorizonYear - 2026) : 10);
   const timingMargin = typeof activeApp?.timingMargin === 'number' && !isNaN(activeApp.timingMargin) ? activeApp.timingMargin : (Z - (X + Y));
-  
+
   const getMoscaScore = (m: number) => {
     if (m <= 0) return { score: 100, text: 'Critical' };
     if (m <= 2) return { score: 75, text: 'Very High' };
@@ -416,13 +417,13 @@ export default function Recommendations({ selectedAnalysisId: propSelectedId, an
             <div>
               <div className="text-blue-200/70 text-[11px]">Timing Margin</div>
               <div className="font-bold text-sm mt-0.5">
-                {typeof timingMargin === 'number' && !isNaN(timingMargin) ? `${timingMargin} years` : "—"}
+                {typeof timingMargin === 'number' && !isNaN(timingMargin) ? `${timingMargin} years` : "-"}
               </div>
             </div>
             <div>
               <div className="text-blue-200/70 text-[11px]">Application Priority</div>
               <div className="font-bold text-sm mt-0.5 text-blue-100">
-                {derivedPriority ? `${derivedPriority} (${derivedAps!.toFixed(1)})` : "—"}
+                {derivedPriority ? `${derivedPriority} (${derivedAps!.toFixed(1)})` : "-"}
               </div>
             </div>
           </div>
@@ -490,35 +491,35 @@ export default function Recommendations({ selectedAnalysisId: propSelectedId, an
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
               <div className="bg-white border border-[#dde1e9] rounded-lg p-4 shadow-2xs">
                 <div className="text-xs font-semibold text-[#6b7589] uppercase tracking-wider">Total Cryptographic Assets</div>
-                <div className="text-2xl font-bold text-[#1e3a5f] mt-1.5">{loading ? "—" : totalAssets}</div>
+                <div className="text-2xl font-bold text-[#1e3a5f] mt-1.5">{loading ? "-" : totalAssets}</div>
                 <div className="text-[11px] text-gray-500 mt-1">Unique logical cryptographic components</div>
               </div>
 
               <div className="bg-white border border-[#dde1e9] rounded-lg p-4 shadow-2xs">
                 <div className="text-xs font-semibold text-[#6b7589] uppercase tracking-wider">Quantum Vulnerable</div>
-                <div className="text-2xl font-bold text-red-700 mt-1.5">{loading ? "—" : quantumVulnerable}</div>
+                <div className="text-2xl font-bold text-red-700 mt-1.5">{loading ? "-" : quantumVulnerable}</div>
                 <div className="text-[11px] text-gray-500 mt-1">High or Medium quantum risk assets</div>
               </div>
 
               <div className="bg-white border border-[#dde1e9] rounded-lg p-4 shadow-2xs">
                 <div className="text-xs font-semibold text-[#6b7589] uppercase tracking-wider">High Priority</div>
-                <div className="text-2xl font-bold text-orange-700 mt-1.5">{loading ? "—" : highPriority}</div>
+                <div className="text-2xl font-bold text-orange-700 mt-1.5">{loading ? "-" : highPriority}</div>
                 <div className="text-[11px] text-gray-500 mt-1">Urgent or High migration urgency</div>
               </div>
 
               <div className="bg-white border border-[#dde1e9] rounded-lg p-4 shadow-2xs">
                 <div className="text-xs font-semibold text-[#6b7589] uppercase tracking-wider">AI Explanations Generated</div>
-                <div className="text-2xl font-bold text-emerald-700 mt-1.5">{loading ? "—" : aiGeneratedCount}</div>
+                <div className="text-2xl font-bold text-emerald-700 mt-1.5">{loading ? "-" : aiGeneratedCount}</div>
                 <div className="text-[11px] text-gray-500 mt-1">Detailed plans via AI Migration Advisor</div>
               </div>
             </div>
 
-            {/* Migration Roadmap — Phase Grouping */}
+            {/* Migration Roadmap - Phase Grouping */}
             <div className="bg-white border border-[#dde1e9] rounded-lg shadow-2xs overflow-hidden">
               <div className="px-6 py-4 border-b border-[#dde1e9] bg-[#f8fafc] flex flex-wrap items-center justify-between gap-2">
                 <div>
                   <h2 className="font-bold text-sm text-[#1e3a5f] flex items-center gap-2">
-                    <span>Migration Roadmap — Phase Grouping</span>
+                    <span>Migration Roadmap - Phase Grouping</span>
                   </h2>
                   <p className="text-xs text-[#6b7589] mt-0.5">
                     Phase grouping dynamically derived from final component Priority produced by Priority Analysis.
@@ -543,7 +544,7 @@ export default function Recommendations({ selectedAnalysisId: propSelectedId, an
                   <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
                     <div className="flex items-center gap-2">
                       <span className="w-2.5 h-2.5 rounded-full bg-red-600"></span>
-                      <h3 className="font-bold text-red-900 text-sm">Phase 1 — Highest Priority Components</h3>
+                      <h3 className="font-bold text-red-900 text-sm">Phase 1 - Highest Priority Components</h3>
                       <span className="text-[10px] font-semibold uppercase tracking-wider text-red-700 bg-red-100 px-2 py-0.5 rounded">
                         Priority: Urgent
                       </span>
@@ -568,7 +569,7 @@ export default function Recommendations({ selectedAnalysisId: propSelectedId, an
                         </div>
                         <div className="flex items-center gap-2 min-w-[120px]">
                           <span className="px-2 py-0.5 bg-red-50 text-red-700 font-semibold rounded text-[11px] border border-red-200">
-                            CPS: {item.priorityScore ?? '—'} ({item.priorityClassification})
+                            CPS: {item.priorityScore ?? '-'} ({item.priorityClassification})
                           </span>
                         </div>
                         <div className="flex-1 text-[#1e3a5f] font-medium flex items-center gap-1.5 truncate">
@@ -590,7 +591,7 @@ export default function Recommendations({ selectedAnalysisId: propSelectedId, an
                   <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
                     <div className="flex items-center gap-2">
                       <span className="w-2.5 h-2.5 rounded-full bg-amber-500"></span>
-                      <h3 className="font-bold text-amber-900 text-sm">Phase 2 — Next Priority Components</h3>
+                      <h3 className="font-bold text-amber-900 text-sm">Phase 2 - Next Priority Components</h3>
                       <span className="text-[10px] font-semibold uppercase tracking-wider text-amber-800 bg-amber-100 px-2 py-0.5 rounded">
                         Priority: High or Monitor
                       </span>
@@ -615,7 +616,7 @@ export default function Recommendations({ selectedAnalysisId: propSelectedId, an
                         </div>
                         <div className="flex items-center gap-2 min-w-[120px]">
                           <span className="px-2 py-0.5 bg-amber-50 text-amber-800 font-semibold rounded text-[11px] border border-amber-200">
-                            CPS: {item.priorityScore ?? '—'} ({item.priorityClassification})
+                            CPS: {item.priorityScore ?? '-'} ({item.priorityClassification})
                           </span>
                         </div>
                         <div className="flex-1 text-[#1e3a5f] font-medium flex items-center gap-1.5 truncate">
@@ -637,7 +638,7 @@ export default function Recommendations({ selectedAnalysisId: propSelectedId, an
                   <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
                     <div className="flex items-center gap-2">
                       <span className="w-2.5 h-2.5 rounded-full bg-emerald-600"></span>
-                      <h3 className="font-bold text-emerald-950 text-sm">Phase 3 — Low Priority / Monitor</h3>
+                      <h3 className="font-bold text-emerald-950 text-sm">Phase 3 - Low Priority / Monitor</h3>
                       <span className="text-[10px] font-semibold uppercase tracking-wider text-emerald-800 bg-emerald-100 border border-emerald-200 px-2 py-0.5 rounded">
                         Priority: Low
                       </span>
@@ -662,7 +663,7 @@ export default function Recommendations({ selectedAnalysisId: propSelectedId, an
                         </div>
                         <div className="flex items-center gap-2 min-w-[120px]">
                           <span className="px-2 py-0.5 bg-emerald-50 text-emerald-800 font-semibold rounded text-[11px] border border-emerald-200">
-                            CPS: {item.priorityScore ?? '—'} ({item.priorityClassification})
+                            CPS: {item.priorityScore ?? '-'} ({item.priorityClassification})
                           </span>
                         </div>
                         <div className="flex-1 text-[#1e3a5f] font-medium flex items-center gap-1.5 truncate">
@@ -702,297 +703,297 @@ export default function Recommendations({ selectedAnalysisId: propSelectedId, an
                   <div>Loading migration recommendations…</div>
                 </div>
               ) : (
-            <div className="divide-y divide-[#dde1e9]">
-              {recommendations.map((item, idx) => {
-                const isExpanded = expandedRows.has(item.assetName);
-                const isGenerating = generatingAsset === item.assetName;
-                const errorMsg = generationError[item.assetName];
-                const auth = item.authoritativeRecommendation;
+                <div className="divide-y divide-[#dde1e9]">
+                  {recommendations.map((item, idx) => {
+                    const isExpanded = expandedRows.has(item.assetName);
+                    const isGenerating = generatingAsset === item.assetName;
+                    const errorMsg = generationError[item.assetName];
+                    const auth = item.authoritativeRecommendation;
 
-                return (
-                  <div key={item.assetId || idx} className="transition-colors">
-                    {/* Collapsed Row Summary */}
-                    <div
-                      onClick={() => toggleRow(item.assetName)}
-                      className={`px-6 py-4 flex flex-wrap items-center justify-between gap-4 cursor-pointer hover:bg-blue-50/30 ${isExpanded ? "bg-blue-50/20" : ""
-                        }`}
-                    >
-                      <div className="flex items-center gap-3 min-w-[240px]">
-                        <button className="text-gray-400 hover:text-[#1e3a5f]">
-                          {isExpanded ? <ChevronDown size={18} /> : <ChevronRight size={18} />}
-                        </button>
-                        <div>
-                          <div className="font-bold text-sm text-[#1e3a5f]">{item.assetName}</div>
-                          <div className="text-[11px] text-[#6b7589] mt-0.5 capitalize flex items-center gap-1.5 flex-wrap">
-                            <span>{item.assetType?.replace(/-/g, ' ')}</span>
-                            <span>•</span>
-                            <span className="uppercase font-mono">{item.primitive}</span>
-                            {item.mode && (
-                              <>
+                    return (
+                      <div key={item.assetId || idx} className="transition-colors">
+                        {/* Collapsed Row Summary */}
+                        <div
+                          onClick={() => toggleRow(item.assetName)}
+                          className={`px-6 py-4 flex flex-wrap items-center justify-between gap-4 cursor-pointer hover:bg-blue-50/30 ${isExpanded ? "bg-blue-50/20" : ""
+                            }`}
+                        >
+                          <div className="flex items-center gap-3 min-w-[240px]">
+                            <button className="text-gray-400 hover:text-[#1e3a5f]">
+                              {isExpanded ? <ChevronDown size={18} /> : <ChevronRight size={18} />}
+                            </button>
+                            <div>
+                              <div className="font-bold text-sm text-[#1e3a5f]">{item.assetName}</div>
+                              <div className="text-[11px] text-[#6b7589] mt-0.5 capitalize flex items-center gap-1.5 flex-wrap">
+                                <span>{item.assetType?.replace(/-/g, ' ')}</span>
                                 <span>•</span>
-                                <span className="font-mono bg-blue-50 text-blue-800 px-1.5 py-0.2 rounded text-[10px] font-bold">
-                                  Mode: {item.mode}
-                                </span>
-                              </>
-                            )}
-                            {item.padding && (
-                              <>
-                                <span>•</span>
-                                <span className="font-mono bg-gray-100 text-gray-700 px-1.5 py-0.2 rounded text-[10px]">
-                                  {item.padding}
-                                </span>
-                              </>
-                            )}
-                          </div>
-                        </div>
-                      </div>
-
-                      <div className="text-center min-w-[80px]">
-                        <span className="inline-flex items-center justify-center px-2 py-0.5 bg-blue-50 text-[#1e3a5f] font-bold rounded text-xs border border-blue-100">
-                          {item.occurrencesCount} {item.occurrencesCount === 1 ? "occurrence" : "occurrences"}
-                        </span>
-                      </div>
-
-                      <div className="min-w-[120px]">
-                        <span className={`text-[11px] font-semibold px-2 py-0.5 rounded-full border ${riskBadge[item.quantumRisk] || riskBadge.Unknown}`}>
-                          {item.quantumRisk} Risk {item.quantumRiskScore !== null ? `(${item.quantumRiskScore})` : ""}
-                        </span>
-                      </div>
-
-                      <div className="min-w-[100px]">
-                        <span className={`text-[11px] font-semibold px-2 py-0.5 rounded-full border ${priorityBadge[item.priorityClassification] || priorityBadge.Unavailable}`}>
-                          {item.priorityClassification}
-                        </span>
-                      </div>
-
-                      <div className="min-w-[220px] flex-1 max-w-[340px]">
-                        <div className="text-xs font-bold text-gray-800 flex items-center gap-1.5 truncate">
-                          <ArrowRight size={13} className="text-[#1e3a5f] shrink-0" />
-                          <span className="truncate">{auth.replacement}</span>
-                        </div>
-                        <div className="text-[10px] text-gray-500 font-mono mt-0.5">{auth.standard}</div>
-                      </div>
-
-                      <div className="min-w-[140px] text-right">
-                        {item.hasAiRecommendation ? (
-                          <span className="inline-flex items-center gap-1 text-[11px] font-semibold px-2 py-0.5 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-full">
-                            <CheckCircle2 size={12} /> AI Plan Ready
-                          </span>
-                        ) : (
-                          <span className="inline-flex items-center gap-1 text-[11px] font-medium px-2 py-0.5 bg-gray-50 text-gray-600 border border-gray-200 rounded-full">
-                            Deterministic Mapped
-                          </span>
-                        )}
-                      </div>
-                    </div>
-
-                    {/* Expanded Recommendation Card */}
-                    {isExpanded && (
-                      <div className="px-6 pb-6 pt-2 bg-[#f8fafc] border-t border-[#dde1e9] space-y-4">
-                        <div className="bg-white border border-[#dde1e9] rounded-lg p-5 shadow-2xs space-y-5">
-
-                          {/* Part A: Asset Details Header */}
-                          <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-7 gap-3 text-xs pb-4 border-b border-gray-100">
-                            <div>
-                              <span className="text-[#6b7589] text-[11px] block">Cryptographic Asset</span>
-                              <span className="font-bold text-[#1e3a5f] text-sm">{item.assetName}</span>
-                            </div>
-                            <div>
-                              <span className="text-[#6b7589] text-[11px] block">Usage / Purpose</span>
-                              <span className="font-semibold text-gray-800">{auth.purpose}</span>
-                            </div>
-                            <div>
-                              <span className="text-[#6b7589] text-[11px] block">Occurrences</span>
-                              <span className="font-semibold text-gray-800">{item.occurrencesCount}</span>
-                            </div>
-                            <div>
-                              <span className="text-[#6b7589] text-[11px] block">Quantum Risk</span>
-                              <span className={`font-semibold ${item.quantumRisk === "High" ? "text-red-700" : item.quantumRisk === "Medium" ? "text-amber-700" : "text-emerald-700"}`}>
-                                {item.quantumRisk} ({item.quantumRiskScore !== null ? item.quantumRiskScore : "—"})
-                              </span>
-                            </div>
-                            <div>
-                              <span className="text-[#6b7589] text-[11px] block">Dependency Impact</span>
-                              <span className="font-semibold text-gray-800">{item.dependencyImpactText}</span>
-                            </div>
-                            <div>
-                              <span className="text-[#6b7589] text-[11px] block">Component Priority</span>
-                              <span className="font-semibold text-gray-800">{item.priorityClassification} {item.priorityScore !== null ? `(CPS ${item.priorityScore})` : ""}</span>
-                            </div>
-                            <div>
-                              <span className="text-[#6b7589] text-[11px] block">Locations ({item.locations.length})</span>
-                              <span className="font-mono text-[11px] text-gray-600 truncate block" title={item.locations.join(", ")}>
-                                {item.locations[0] || "N/A"}
-                              </span>
+                                <span className="uppercase font-mono">{item.primitive}</span>
+                                {item.mode && (
+                                  <>
+                                    <span>•</span>
+                                    <span className="font-mono bg-blue-50 text-blue-800 px-1.5 py-0.2 rounded text-[10px] font-bold">
+                                      Mode: {item.mode}
+                                    </span>
+                                  </>
+                                )}
+                                {item.padding && (
+                                  <>
+                                    <span>•</span>
+                                    <span className="font-mono bg-gray-100 text-gray-700 px-1.5 py-0.2 rounded text-[10px]">
+                                      {item.padding}
+                                    </span>
+                                  </>
+                                )}
+                              </div>
                             </div>
                           </div>
 
-                          {/* Part B: Authoritative Recommended Replacement Card (Section 11) */}
-                          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                            <div className="border border-blue-200 bg-blue-50/40 rounded-lg p-4 space-y-2.5">
-                              <div className="flex items-center justify-between">
-                                <span className="text-[10px] font-bold uppercase tracking-wider text-[#1e3a5f] flex items-center gap-1.5">
-                                  <ShieldCheck size={14} className="text-[#1e3a5f]" />
-                                  RECOMMENDED REPLACEMENT (AUTHORITATIVE)
-                                </span>
-                                <span className="text-[10px] font-mono bg-blue-100 text-[#1e3a5f] px-2 py-0.5 rounded font-bold">
-                                  {auth.standard}
-                                </span>
-                              </div>
+                          <div className="text-center min-w-[80px]">
+                            <span className="inline-flex items-center justify-center px-2 py-0.5 bg-blue-50 text-[#1e3a5f] font-bold rounded text-xs border border-blue-100">
+                              {item.occurrencesCount} {item.occurrencesCount === 1 ? "occurrence" : "occurrences"}
+                            </span>
+                          </div>
 
-                              <div className="text-base font-bold text-[#1a1d23] flex items-start gap-2">
-                                <Zap size={16} className="text-blue-700 mt-0.5 shrink-0" />
-                                <span>{auth.recommendation || auth.replacement}</span>
-                              </div>
+                          <div className="min-w-[120px]">
+                            <span className={`text-[11px] font-semibold px-2 py-0.5 rounded-full border ${riskBadge[item.quantumRisk] || riskBadge.Unknown}`}>
+                              {item.quantumRisk === 'Unknown' ? 'Unknown / Review' : item.quantumRisk} {item.quantumRiskScore !== null ? `(${item.quantumRiskScore})` : "(-)"}
+                            </span>
+                          </div>
 
-                              <div className="grid grid-cols-2 gap-2 text-xs pt-1 border-t border-blue-100/80">
+                          <div className="min-w-[100px]">
+                            <span className={`text-[11px] font-semibold px-2 py-0.5 rounded-full border ${priorityBadge[item.priorityClassification] || priorityBadge.Unavailable}`}>
+                              {item.priorityClassification}
+                            </span>
+                          </div>
+
+                          <div className="min-w-[220px] flex-1 max-w-[340px]">
+                            <div className="text-xs font-bold text-gray-800 flex items-center gap-1.5 truncate">
+                              <ArrowRight size={13} className="text-[#1e3a5f] shrink-0" />
+                              <span className="truncate">{auth.replacement}</span>
+                            </div>
+                            <div className="text-[10px] text-gray-500 font-mono mt-0.5">{auth.standard}</div>
+                          </div>
+
+                          <div className="min-w-[140px] text-right">
+                            {item.hasAiRecommendation ? (
+                              <span className="inline-flex items-center gap-1 text-[11px] font-semibold px-2 py-0.5 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-full">
+                                <CheckCircle2 size={12} /> AI Plan Ready
+                              </span>
+                            ) : (
+                              <span className="inline-flex items-center gap-1 text-[11px] font-medium px-2 py-0.5 bg-gray-50 text-gray-600 border border-gray-200 rounded-full">
+                                Deterministic Mapped
+                              </span>
+                            )}
+                          </div>
+                        </div>
+
+                        {/* Expanded Recommendation Card */}
+                        {isExpanded && (
+                          <div className="px-6 pb-6 pt-2 bg-[#f8fafc] border-t border-[#dde1e9] space-y-4">
+                            <div className="bg-white border border-[#dde1e9] rounded-lg p-5 shadow-2xs space-y-5">
+
+                              {/* Part A: Asset Details Header */}
+                              <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-7 gap-3 text-xs pb-4 border-b border-gray-100">
                                 <div>
-                                  <span className="text-[10px] font-semibold text-[#6b7589] uppercase tracking-wider block">Standard / Guidance:</span>
-                                  <span className="font-mono text-xs text-gray-800 font-semibold">{auth.standard}</span>
+                                  <span className="text-[#6b7589] text-[11px] block">Cryptographic Asset</span>
+                                  <span className="font-bold text-[#1e3a5f] text-sm">{item.assetName}</span>
                                 </div>
                                 <div>
-                                  <span className="text-[10px] font-semibold text-[#6b7589] uppercase tracking-wider block">Purpose:</span>
+                                  <span className="text-[#6b7589] text-[11px] block">Usage / Purpose</span>
                                   <span className="font-semibold text-gray-800">{auth.purpose}</span>
                                 </div>
-                              </div>
-
-                              <div className="text-xs text-gray-700 pt-1.5 border-t border-blue-100/80 leading-relaxed">
-                                <strong className="text-[#1e3a5f]">Why:</strong> {auth.why || auth.strategy}
-                              </div>
-                            </div>
-
-                            <div className="border border-[#dde1e9] rounded-lg p-4 bg-white space-y-2.5">
-                              <div className="text-[10px] font-bold uppercase tracking-wider text-[#6b7589] flex items-center gap-1.5">
-                                <Layers size={13} className="text-[#6b7589]" />
-                                Implementation Roadmap
-                              </div>
-                              <ul className="space-y-1.5 text-xs text-gray-700">
-                                {auth.implementationSteps.slice(0, 5).map((step, sIdx) => (
-                                  <li key={sIdx} className="flex items-start gap-2">
-                                    <span className="font-bold text-[#1e3a5f] text-[11px] shrink-0">{sIdx + 1}.</span>
-                                    <span className="leading-tight">{step}</span>
-                                  </li>
-                                ))}
-                              </ul>
-                              <div className="pt-2 text-[11px] text-[#6b7589] border-t border-gray-100">
-                                <strong className="text-gray-700">Validation:</strong> {auth.validation}
-                              </div>
-                            </div>
-                          </div>
-
-                          {/* Part C: AI Migration Advisor */}
-                          <div className="border border-[#dde1e9] rounded-lg p-4 bg-[#fafbfc] space-y-3">
-                            <div className="flex flex-wrap items-center justify-between gap-2">
-                              <div className="flex items-center gap-2">
-                                <Sparkles size={16} className="text-purple-600" />
                                 <div>
-                                  <span className="text-xs font-bold text-gray-800">
-                                    AI MIGRATION ADVISOR
+                                  <span className="text-[#6b7589] text-[11px] block">Occurrences</span>
+                                  <span className="font-semibold text-gray-800">{item.occurrencesCount}</span>
+                                </div>
+                                <div>
+                                  <span className="text-[#6b7589] text-[11px] block">Quantum Risk</span>
+                                  <span className={`font-semibold ${item.quantumRisk === "High" ? "text-red-700" : item.quantumRisk === "Medium" ? "text-amber-700" : item.quantumRisk === "Low" ? "text-emerald-700" : "text-gray-600"}`}>
+                                    {item.quantumRisk === 'Unknown' ? 'Unknown / Review' : item.quantumRisk} ({item.quantumRiskScore !== null ? item.quantumRiskScore : "-"})
                                   </span>
                                 </div>
-                                {item.hasAiRecommendation && (
-                                  <span className="text-[10px] bg-purple-100 text-purple-800 px-2 py-0.5 rounded font-semibold ml-1">
-                                    AI Plan Ready
+                                <div>
+                                  <span className="text-[#6b7589] text-[11px] block">Dependency Impact</span>
+                                  <span className="font-semibold text-gray-800">{item.dependencyImpactText}</span>
+                                </div>
+                                <div>
+                                  <span className="text-[#6b7589] text-[11px] block">Component Priority</span>
+                                  <span className="font-semibold text-gray-800">{item.priorityClassification} {item.priorityScore !== null ? `(CPS ${item.priorityScore})` : ""}</span>
+                                </div>
+                                <div>
+                                  <span className="text-[#6b7589] text-[11px] block">Locations ({item.locations.length})</span>
+                                  <span className="font-mono text-[11px] text-gray-600 truncate block" title={item.locations.join(", ")}>
+                                    {item.locations[0] || "N/A"}
                                   </span>
+                                </div>
+                              </div>
+
+                              {/* Part B: Authoritative Recommended Replacement Card (Section 11) */}
+                              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                <div className="border border-blue-200 bg-blue-50/40 rounded-lg p-4 space-y-2.5">
+                                  <div className="flex items-center justify-between">
+                                    <span className="text-[10px] font-bold uppercase tracking-wider text-[#1e3a5f] flex items-center gap-1.5">
+                                      <ShieldCheck size={14} className="text-[#1e3a5f]" />
+                                      RECOMMENDED REPLACEMENT (AUTHORITATIVE)
+                                    </span>
+                                    <span className="text-[10px] font-mono bg-blue-100 text-[#1e3a5f] px-2 py-0.5 rounded font-bold">
+                                      {auth.standard}
+                                    </span>
+                                  </div>
+
+                                  <div className="text-base font-bold text-[#1a1d23] flex items-start gap-2">
+                                    <Zap size={16} className="text-blue-700 mt-0.5 shrink-0" />
+                                    <span>{auth.recommendation || auth.replacement}</span>
+                                  </div>
+
+                                  <div className="grid grid-cols-2 gap-2 text-xs pt-1 border-t border-blue-100/80">
+                                    <div>
+                                      <span className="text-[10px] font-semibold text-[#6b7589] uppercase tracking-wider block">Standard / Guidance:</span>
+                                      <span className="font-mono text-xs text-gray-800 font-semibold">{auth.standard}</span>
+                                    </div>
+                                    <div>
+                                      <span className="text-[10px] font-semibold text-[#6b7589] uppercase tracking-wider block">Purpose:</span>
+                                      <span className="font-semibold text-gray-800">{auth.purpose}</span>
+                                    </div>
+                                  </div>
+
+                                  <div className="text-xs text-gray-700 pt-1.5 border-t border-blue-100/80 leading-relaxed">
+                                    <strong className="text-[#1e3a5f]">Why:</strong> {auth.why || auth.strategy}
+                                  </div>
+                                </div>
+
+                                <div className="border border-[#dde1e9] rounded-lg p-4 bg-white space-y-2.5">
+                                  <div className="text-[10px] font-bold uppercase tracking-wider text-[#6b7589] flex items-center gap-1.5">
+                                    <Layers size={13} className="text-[#6b7589]" />
+                                    Implementation Roadmap
+                                  </div>
+                                  <ul className="space-y-1.5 text-xs text-gray-700">
+                                    {auth.implementationSteps.slice(0, 5).map((step, sIdx) => (
+                                      <li key={sIdx} className="flex items-start gap-2">
+                                        <span className="font-bold text-[#1e3a5f] text-[11px] shrink-0">{sIdx + 1}.</span>
+                                        <span className="leading-tight">{step}</span>
+                                      </li>
+                                    ))}
+                                  </ul>
+                                  <div className="pt-2 text-[11px] text-[#6b7589] border-t border-gray-100">
+                                    <strong className="text-gray-700">Validation:</strong> {auth.validation}
+                                  </div>
+                                </div>
+                              </div>
+
+                              {/* Part C: AI Migration Advisor */}
+                              <div className="border border-[#dde1e9] rounded-lg p-4 bg-[#fafbfc] space-y-3">
+                                <div className="flex flex-wrap items-center justify-between gap-2">
+                                  <div className="flex items-center gap-2">
+                                    <Sparkles size={16} className="text-purple-600" />
+                                    <div>
+                                      <span className="text-xs font-bold text-gray-800">
+                                        AI MIGRATION ADVISOR
+                                      </span>
+                                    </div>
+                                    {item.hasAiRecommendation && (
+                                      <span className="text-[10px] bg-purple-100 text-purple-800 px-2 py-0.5 rounded font-semibold ml-1">
+                                        AI Plan Ready
+                                      </span>
+                                    )}
+                                  </div>
+
+                                  <div className="flex items-center gap-2">
+                                    <button
+                                      disabled={isGenerating || !aiStatus.connected}
+                                      onClick={() => handleGenerateAI(item.assetName, item.hasAiRecommendation)}
+                                      className={`px-3 py-1.5 rounded-md text-xs font-semibold flex items-center gap-1.5 transition-all ${isGenerating
+                                        ? "bg-gray-200 text-gray-500 cursor-not-allowed"
+                                        : !aiStatus.connected
+                                          ? "bg-gray-100 text-gray-400 border border-gray-200 cursor-not-allowed"
+                                          : item.hasAiRecommendation
+                                            ? "bg-white border border-[#dde1e9] text-[#1e3a5f] hover:bg-gray-50 shadow-2xs"
+                                            : "bg-[#1e3a5f] text-white hover:bg-[#162d4a] shadow-xs"
+                                        }`}
+                                      title={!aiStatus.connected ? "AI explanations are currently unavailable." : "Generate AI migration explanation"}
+                                    >
+                                      {isGenerating ? (
+                                        <>
+                                          <Loader2 size={13} className="animate-spin text-[#1e3a5f]" />
+                                          <span>Generating explanation...</span>
+                                        </>
+                                      ) : item.hasAiRecommendation ? (
+                                        <>
+                                          <RefreshCw size={12} />
+                                          <span>Regenerate AI Explanation</span>
+                                        </>
+                                      ) : (
+                                        <>
+                                          <Sparkles size={13} />
+                                          <span>Generate AI Explanation</span>
+                                        </>
+                                      )}
+                                    </button>
+                                  </div>
+                                </div>
+
+                                {errorMsg && (
+                                  <div className="p-2.5 bg-red-50 border border-red-200 rounded text-xs text-red-700 flex items-center gap-2">
+                                    <AlertTriangle size={14} className="shrink-0" />
+                                    <span>{errorMsg}</span>
+                                  </div>
+                                )}
+
+                                {item.hasAiRecommendation && item.aiRecommendation?.explanation ? (
+                                  <div
+                                    className="p-4 bg-white border border-[#dde1e9] rounded-md space-y-3 text-xs text-gray-800"
+                                    style={{
+                                      height: 'auto',
+                                      minHeight: '60px',
+                                      overflow: 'visible',
+                                      whiteSpace: 'normal',
+                                      overflowWrap: 'anywhere',
+                                      wordBreak: 'break-word',
+                                      lineHeight: 1.6
+                                    }}
+                                  >
+                                    <div
+                                      className="text-xs text-gray-800"
+                                      style={{
+                                        height: 'auto',
+                                        overflow: 'visible',
+                                        whiteSpace: 'pre-wrap',
+                                        overflowWrap: 'anywhere',
+                                        wordBreak: 'break-word',
+                                        lineHeight: 1.6
+                                      }}
+                                    >
+                                      {item.aiRecommendation.explanation}
+                                    </div>
+                                    <div className="pt-2 text-[10px] text-gray-400 border-t border-gray-100 flex items-center justify-between">
+                                      <span>AI explanation generated based on authoritative CRYPTAVISTA data</span>
+                                      {item.aiRecommendation.generatedAt && (
+                                        <span>{new Date(item.aiRecommendation.generatedAt).toLocaleString()}</span>
+                                      )}
+                                    </div>
+                                  </div>
+                                ) : (
+                                  <div className="p-3 bg-white border border-dashed border-gray-200 rounded-md text-xs text-gray-500 flex items-center justify-between">
+                                    <span>
+                                      {aiStatus.connected
+                                        ? "Click 'Generate AI Explanation' to generate technical explanation and migration guidance."
+                                        : "AI explanations are currently unavailable. The authoritative migration recommendation is still available."}
+                                    </span>
+                                  </div>
                                 )}
                               </div>
 
-                              <div className="flex items-center gap-2">
-                                <button
-                                  disabled={isGenerating || !aiStatus.connected}
-                                  onClick={() => handleGenerateAI(item.assetName, item.hasAiRecommendation)}
-                                  className={`px-3 py-1.5 rounded-md text-xs font-semibold flex items-center gap-1.5 transition-all ${isGenerating
-                                      ? "bg-gray-200 text-gray-500 cursor-not-allowed"
-                                      : !aiStatus.connected
-                                        ? "bg-gray-100 text-gray-400 border border-gray-200 cursor-not-allowed"
-                                        : item.hasAiRecommendation
-                                          ? "bg-white border border-[#dde1e9] text-[#1e3a5f] hover:bg-gray-50 shadow-2xs"
-                                          : "bg-[#1e3a5f] text-white hover:bg-[#162d4a] shadow-xs"
-                                    }`}
-                                  title={!aiStatus.connected ? "AI explanations are currently unavailable." : "Generate AI migration explanation"}
-                                >
-                                  {isGenerating ? (
-                                    <>
-                                      <Loader2 size={13} className="animate-spin text-[#1e3a5f]" />
-                                      <span>Generating explanation...</span>
-                                    </>
-                                  ) : item.hasAiRecommendation ? (
-                                    <>
-                                      <RefreshCw size={12} />
-                                      <span>Regenerate AI Explanation</span>
-                                    </>
-                                  ) : (
-                                    <>
-                                      <Sparkles size={13} />
-                                      <span>Generate AI Explanation</span>
-                                    </>
-                                  )}
-                                </button>
-                              </div>
                             </div>
-
-                            {errorMsg && (
-                              <div className="p-2.5 bg-red-50 border border-red-200 rounded text-xs text-red-700 flex items-center gap-2">
-                                <AlertTriangle size={14} className="shrink-0" />
-                                <span>{errorMsg}</span>
-                              </div>
-                            )}
-
-                            {item.hasAiRecommendation && item.aiRecommendation?.explanation ? (
-                              <div
-                                className="p-4 bg-white border border-[#dde1e9] rounded-md space-y-3 text-xs text-gray-800"
-                                style={{
-                                  height: 'auto',
-                                  minHeight: '60px',
-                                  overflow: 'visible',
-                                  whiteSpace: 'normal',
-                                  overflowWrap: 'anywhere',
-                                  wordBreak: 'break-word',
-                                  lineHeight: 1.6
-                                }}
-                              >
-                                <div
-                                  className="text-xs text-gray-800"
-                                  style={{
-                                    height: 'auto',
-                                    overflow: 'visible',
-                                    whiteSpace: 'pre-wrap',
-                                    overflowWrap: 'anywhere',
-                                    wordBreak: 'break-word',
-                                    lineHeight: 1.6
-                                  }}
-                                >
-                                  {item.aiRecommendation.explanation}
-                                </div>
-                                <div className="pt-2 text-[10px] text-gray-400 border-t border-gray-100 flex items-center justify-between">
-                                  <span>AI explanation generated based on authoritative CRYPTAVISTA data</span>
-                                  {item.aiRecommendation.generatedAt && (
-                                    <span>{new Date(item.aiRecommendation.generatedAt).toLocaleString()}</span>
-                                  )}
-                                </div>
-                              </div>
-                            ) : (
-                              <div className="p-3 bg-white border border-dashed border-gray-200 rounded-md text-xs text-gray-500 flex items-center justify-between">
-                                <span>
-                                  {aiStatus.connected
-                                    ? "Click 'Generate AI Explanation' to generate technical explanation and migration guidance."
-                                    : "AI explanations are currently unavailable. The authoritative migration recommendation is still available."}
-                                </span>
-                              </div>
-                            )}
                           </div>
-
-                        </div>
+                        )}
                       </div>
-                    )}
-                  </div>
-                );
-              })}
+                    );
+                  })}
+                </div>
+              )}
             </div>
-          )}
-        </div>
-      </>
-    )}
+          </>
+        )}
 
       </div>
     </div>

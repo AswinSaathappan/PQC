@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Plus, Target, Layers } from "lucide-react";
+import { Target, Layers } from "lucide-react";
 
 function getAppStageStatuses(app: any): {
   discover: string;
@@ -169,9 +169,6 @@ export default function Applications({ onNewAnalysis, onNavigate, onSelectAnalys
             <div className="text-[14px] font-bold text-[#1a1d23]">Applications & Targets</div>
             <div className="text-[11px] text-[#6b7589] mt-0.5">Manage analyzed applications and scan targets</div>
           </div>
-          <button onClick={onNewAnalysis} className="flex items-center gap-1.5 text-[11px] text-white bg-[#1e3a5f] px-3 py-1.5 rounded-md hover:bg-[#162e4d]">
-            <Plus size={14} /> New Analysis
-          </button>
         </div>
 
         {analyses.length === 0 ? (

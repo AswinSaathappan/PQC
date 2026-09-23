@@ -56,8 +56,8 @@ export default function DependencyGraph({ selectedAnalysisId, analyses = [], onS
               setElements(data.elements);
               setUniqueAssetsCount(data.uniqueAssets || data.elements.filter((e: any) => !e.data?.source).length);
               setCbomOccurrencesCount(data.cbomOccurrences || 0);
-              const edgesCount = typeof data.summary?.totalEdges === 'number' 
-                ? data.summary.totalEdges 
+              const edgesCount = typeof data.summary?.totalEdges === 'number'
+                ? data.summary.totalEdges
                 : data.elements.filter((e: any) => Boolean(e.data?.source)).length;
               setTotalEdges(edgesCount);
               setAvailable(true);
@@ -341,7 +341,7 @@ export default function DependencyGraph({ selectedAnalysisId, analyses = [], onS
                   </div>
                   <div className="bg-[#f8fafc] border border-[#dde1e9] rounded-md p-2.5">
                     <div className="text-[10px] text-[#6b7589] uppercase font-semibold">Primitive</div>
-                    <div className="font-semibold text-gray-900 mt-0.5">{selectedNode.primitive || "—"}</div>
+                    <div className="font-semibold text-gray-900 mt-0.5">{selectedNode.primitive || "-"}</div>
                   </div>
                 </div>
 

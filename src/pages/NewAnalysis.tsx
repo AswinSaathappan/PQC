@@ -76,7 +76,7 @@ export default function NewAnalysis({ onComplete, onNavigate, onSelectAnalysis, 
         if (analysis?.analysisId) {
           localStorage.setItem("cryptavista_selected_analysis_id", analysis.analysisId);
         }
-      } catch {}
+      } catch { }
       if (refreshAnalyses && analysis?.analysisId) {
         refreshAnalyses(analysis.analysisId);
       }
@@ -104,9 +104,8 @@ export default function NewAnalysis({ onComplete, onNavigate, onSelectAnalysis, 
             return (
               <div key={n} className="flex items-center flex-1 last:flex-none">
                 <div className="flex items-center gap-2">
-                  <div className={`w-7 h-7 rounded-full flex items-center justify-center flex-shrink-0 text-[11px] font-bold border-2 transition-colors ${
-                    done ? "bg-emerald-500 border-emerald-500 text-white" : active ? "bg-[#1e3a5f] border-[#1e3a5f] text-white" : "bg-white border-[#dde1e9] text-[#9aa1b1]"
-                  }`}>
+                  <div className={`w-7 h-7 rounded-full flex items-center justify-center flex-shrink-0 text-[11px] font-bold border-2 transition-colors ${done ? "bg-emerald-500 border-emerald-500 text-white" : active ? "bg-[#1e3a5f] border-[#1e3a5f] text-white" : "bg-white border-[#dde1e9] text-[#9aa1b1]"
+                    }`}>
                     {done ? <CheckCircle size={13} /> : n}
                   </div>
                   <span className={`text-[11px] font-medium whitespace-nowrap ${active ? "text-[#1a1d23]" : done ? "text-emerald-600" : "text-[#9aa1b1]"}`}>{label}</span>
@@ -138,9 +137,8 @@ export default function NewAnalysis({ onComplete, onNavigate, onSelectAnalysis, 
                   const Icon = t.icon;
                   return (
                     <button key={t.id} onClick={() => setInputType(t.id)}
-                      className={`flex items-center gap-3 px-4 py-3 rounded-lg border text-left transition-all ${
-                        inputType === t.id ? "border-[#1e3a5f] bg-[#f0f4fa]" : "border-[#dde1e9] hover:border-[#1e3a5f]/40 hover:bg-[#f9fafb]"
-                      }`}>
+                      className={`flex items-center gap-3 px-4 py-3 rounded-lg border text-left transition-all ${inputType === t.id ? "border-[#1e3a5f] bg-[#f0f4fa]" : "border-[#dde1e9] hover:border-[#1e3a5f]/40 hover:bg-[#f9fafb]"
+                        }`}>
                       <Icon size={16} className={inputType === t.id ? "text-[#1e3a5f]" : "text-[#6b7589]"} />
                       <div>
                         <div className={`text-[12px] font-semibold ${inputType === t.id ? "text-[#1e3a5f]" : "text-[#1a1d23]"}`}>{t.label}</div>
@@ -152,7 +150,7 @@ export default function NewAnalysis({ onComplete, onNavigate, onSelectAnalysis, 
               </div>
 
               <div className="mt-3 text-[10px] text-[#9aa1b1]">
-                Do not manually enter cryptographic algorithms — CRYPTAVISTA discovers these automatically from your input.
+                Do not manually enter cryptographic algorithms - CRYPTAVISTA discovers these automatically from your input.
               </div>
             </div>
 
@@ -179,9 +177,8 @@ export default function NewAnalysis({ onComplete, onNavigate, onSelectAnalysis, 
               <div className="flex gap-2">
                 {["Low", "Medium", "High", "Critical"].map(c => (
                   <button key={c} onClick={() => setCriticality(c)}
-                    className={`flex-1 text-[11px] font-medium py-2 rounded-md border transition-all ${
-                      criticality === c ? "border-[#1e3a5f] bg-[#f0f4fa] text-[#1e3a5f] font-bold" : "border-[#dde1e9] text-[#6b7589] hover:border-[#1e3a5f]/40"
-                    }`}>{c}</button>
+                    className={`flex-1 text-[11px] font-medium py-2 rounded-md border transition-all ${criticality === c ? "border-[#1e3a5f] bg-[#f0f4fa] text-[#1e3a5f] font-bold" : "border-[#dde1e9] text-[#6b7589] hover:border-[#1e3a5f]/40"
+                      }`}>{c}</button>
                 ))}
               </div>
             </div>
@@ -192,21 +189,20 @@ export default function NewAnalysis({ onComplete, onNavigate, onSelectAnalysis, 
               <div className="flex gap-2">
                 {["Public", "Internal", "Confidential", "Highly Confidential"].map(s => (
                   <button key={s} onClick={() => setSensitivity(s)}
-                    className={`flex-1 text-[11px] font-medium py-1.5 rounded-md border transition-all ${
-                      sensitivity === s ? "border-[#1e3a5f] bg-[#f0f4fa] text-[#1e3a5f] font-bold" : "border-[#dde1e9] text-[#6b7589] hover:border-[#1e3a5f]/40"
-                    }`}>{s}</button>
+                    className={`flex-1 text-[11px] font-medium py-1.5 rounded-md border transition-all ${sensitivity === s ? "border-[#1e3a5f] bg-[#f0f4fa] text-[#1e3a5f] font-bold" : "border-[#dde1e9] text-[#6b7589] hover:border-[#1e3a5f]/40"
+                      }`}>{s}</button>
                 ))}
               </div>
             </div>
 
-            {/* Expected Data Lifetime — Numeric input */}
+            {/* Expected Data Lifetime - Numeric input */}
             <div>
               <label className="block text-[11px] font-semibold text-[#1a1d23] mb-1.5">Data Protection Duration (Years) *</label>
-              <input 
-                type="number" 
-                min="1" 
-                max="100" 
-                value={dataLifetime === '' ? '' : dataLifetime} 
+              <input
+                type="number"
+                min="1"
+                max="100"
+                value={dataLifetime === '' ? '' : dataLifetime}
                 onChange={e => {
                   const val = e.target.value;
                   if (val === '') {
@@ -241,7 +237,7 @@ export default function NewAnalysis({ onComplete, onNavigate, onSelectAnalysis, 
               <div className="text-[11px] text-[#6b7589]">CRYPTAVISTA will perform the following analysis automatically on your selected input.</div>
             </div>
 
-            {/* Static discovery — always on */}
+            {/* Static discovery - always on */}
             <div className="bg-[#f9fafb] border border-[#dde1e9] rounded-lg p-4">
               <div className="flex items-center justify-between">
                 <div>
@@ -257,7 +253,7 @@ export default function NewAnalysis({ onComplete, onNavigate, onSelectAnalysis, 
               </div>
             </div>
 
-            {/* Runtime verification — optional */}
+            {/* Runtime verification - optional */}
             <div className="bg-[#f9fafb] border border-[#dde1e9] rounded-lg p-4">
               <div className="flex items-center justify-between">
                 <div className="flex-1 mr-4">
@@ -310,7 +306,7 @@ export default function NewAnalysis({ onComplete, onNavigate, onSelectAnalysis, 
             <div className="bg-[#f9fafb] border border-[#dde1e9] rounded-lg divide-y divide-[#eef0f3]">
               {[
                 { label: "Application", value: appName },
-                { label: "Input Source", value: inputTypes.find(t => t.id === inputType)?.label ?? "—" },
+                { label: "Input Source", value: inputTypes.find(t => t.id === inputType)?.label ?? "-" },
                 { label: "Business Criticality", value: criticality },
                 { label: "Data Sensitivity", value: sensitivity },
                 { label: "Data Protection Duration", value: `${dataLifetime} Years` },

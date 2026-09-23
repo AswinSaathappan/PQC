@@ -10,6 +10,8 @@ export interface ICbom extends Document {
     notApplicable: number;
     notQuantumSafe: number;
     quantumSafe: number;
+    quantumVulnerable?: number;
+    quantumWeakened?: number;
     complianceStatus?: string;
   };
   complianceResponse?: object;
@@ -26,6 +28,8 @@ const CbomSchema: Schema = new Schema({
     notApplicable: { type: Number },
     notQuantumSafe: { type: Number },
     quantumSafe: { type: Number, default: 0 },
+    quantumVulnerable: { type: Number, default: 0 },
+    quantumWeakened: { type: Number, default: 0 },
     complianceStatus: { type: String, default: 'completed' }
   },
   complianceResponse: { type: Schema.Types.Mixed },

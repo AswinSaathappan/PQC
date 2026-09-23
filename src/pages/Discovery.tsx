@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { Search, Download, ChevronRight, ChevronDown } from "lucide-react";
+import { classifyAsset } from "../utils/quantumClassification";
 
 interface Props {
   selectedAnalysisId?: string;
@@ -91,7 +92,8 @@ export default function Discovery({ selectedAnalysisId: propSelectedId, analyses
     const rows: string[][] = [];
 
     assets.forEach(asset => {
-      const qStatus = asset.quantumSafe === true ? "Quantum Safe" : (asset.quantumSafe === false ? "Not Quantum Safe" : "Unknown");
+      const norm = classifyAsset(asset);
+      const qStatus = norm.quantumClassification;
       const occurrences = asset.occurrences && asset.occurrences.length > 0 ? asset.occurrences : [{ location: asset.location }];
       
       occurrences.forEach((occ: any) => {

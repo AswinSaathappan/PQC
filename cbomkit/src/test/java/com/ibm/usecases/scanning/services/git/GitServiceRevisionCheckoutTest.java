@@ -78,7 +78,7 @@ class GitServiceRevisionCheckoutTest {
                         .call();
             }
 
-            // Clone using the tag revision only — no commit hash supplied.
+            // Clone using the tag revision only - no commit hash supplied.
             // This is the path taken for Maven PURLs (e.g. guava@33.0.0-jre).
             GitService gitService = new GitService(baseCloneDir.getAbsolutePath(), null);
             GitUrl gitUrl = new GitUrl("file://" + sourceDir.getAbsolutePath());

@@ -441,17 +441,32 @@ export class CbomkitAdapter {
       await CryptoAsset.deleteMany({ analysisId });
     }
 
-    // Count ALL occurrences for the 5 summary cards
+    // Count ALL occurrences for summary cards
     let unknownCount = 0;
     let notApplicableCount = 0;
     let notQuantumSafeCount = 0;
     let quantumSafeCount = 0;
+    let quantumVulnerableCount = 0;
+    let quantumWeakenedCount = 0;
 
     for (const row of assetRows) {
-      if (row.cbomKitClassification === 'Quantum Safe') quantumSafeCount++;
-      else if (row.cbomKitClassification === 'Not Quantum Safe') notQuantumSafeCount++;
-      else if (row.cbomKitClassification === 'Not Applicable') notApplicableCount++;
-      else unknownCount++;
+      const c = row.cbomKitClassification;
+      const qClass = row.cryptavistaQuantumClassification;
+      const alg = (row.algorithm || row.assetName || '').toUpperCase();
+      const isPqc = /ML-KEM|MLKEM|ML-DSA|MLDSA|SLH-DSA|SLHDSA|KYBER|DILITHIUM|FALCON|SPHINCS/i.test(alg);
+      const isSym = /AES|CHACHA|DES|3DES|RC4|BLAKE|SHA|MD5/i.test(alg) || row.category === 'symmetric' || row.primitive === 'block-cipher' || row.primitive === 'hash';
+
+      if (isPqc || c === 'Quantum Safe' || qClass === 'QUANTUM_SAFE') {
+        quantumSafeCount++;
+      } else if (isSym) {
+        quantumWeakenedCount++;
+        notApplicableCount++;
+      } else if (c === 'Not Quantum Safe' || qClass === 'NOT_QUANTUM_SAFE' || /RSA|ECDSA|ECDH|ECC|DIFFIE/i.test(alg)) {
+        quantumVulnerableCount++;
+        notQuantumSafeCount++;
+      } else {
+        unknownCount++;
+      }
     }
 
     const cbomSummary = {
@@ -460,6 +475,8 @@ export class CbomkitAdapter {
       notApplicable: notApplicableCount,
       notQuantumSafe: notQuantumSafeCount,
       quantumSafe: quantumSafeCount,
+      quantumVulnerable: quantumVulnerableCount,
+      quantumWeakened: quantumWeakenedCount,
       complianceStatus: complianceResult.status
     };
 
@@ -483,7 +500,9 @@ export class CbomkitAdapter {
             unknown: unknownCount,
             notApplicable: notApplicableCount,
             notQuantumSafe: notQuantumSafeCount,
-            quantumSafe: quantumSafeCount
+            quantumSafe: quantumSafeCount,
+            quantumVulnerable: quantumVulnerableCount,
+            quantumWeakened: quantumWeakenedCount
           },
           detectedCryptoAssetCount: assetRows.length,
           'stages.discover.assetCount': assetRows.length
@@ -492,7 +511,7 @@ export class CbomkitAdapter {
     );
 
     console.log(`[CBOMkit] Authoritative inventory stored: ${assetRows.length} detected assets for ${analysisId}`);
-    console.log(`[CBOMkit] 5-Card Summary -> Total: ${cbomSummary.totalCryptoAssets}, Unknown: ${cbomSummary.unknown}, Not Applicable: ${cbomSummary.notApplicable}, Not Quantum Safe: ${cbomSummary.notQuantumSafe}, Quantum Safe: ${cbomSummary.quantumSafe}`);
+    console.log(`[CBOMkit] Summary -> Total: ${cbomSummary.totalCryptoAssets}, Quantum Safe: ${cbomSummary.quantumSafe}, Quantum Vulnerable: ${cbomSummary.quantumVulnerable}, Quantum-Weakened: ${cbomSummary.quantumWeakened}, Unknown: ${cbomSummary.unknown}`);
 
     // Step 4: Synchronize authoritative CBOM to CBOMKit backend storage for visualization (on final completion)
     if (!isPartial) {

@@ -4,10 +4,12 @@ export function getLocalComplianceServiceName() {
 
 export function createLocalComplianceReport(cbom) {
     const COMPLIANCE_SERVICE_NAME = getLocalComplianceServiceName();
-    const POLICY_NAME = "NIST Post-Quantum Cryptography";
+    const POLICY_NAME = "CRYPTAVISTA Post-Quantum Cryptography";
     const ASYMMETRIC_PRIMITIVES = ["signature", "key-agree", "kem", "pke"];
-    const UNKNOWN_PRIMITIVES = ["unknown", "other"];
-    const WHITELIST_NAMES = ["ml-kem", "ml-dsa", "slh-dsa", "pqxdh", "bike", "mceliece", "frodokem","hqc", "kyber", "ntru", "crystals", "falcon", "mayo", "sphincs", "xmss", "lms"];
+    const SYMMETRIC_PRIMITIVES = ["block-cipher", "stream-cipher", "hash", "digest", "mac", "kdf"];
+    const PQC_NAMES = ["ml-kem", "ml-dsa", "slh-dsa", "pqxdh", "bike", "mceliece", "frodokem", "hqc", "kyber", "ntru", "crystals", "falcon", "mayo", "sphincs", "xmss", "lms", "dilithium"];
+    const CLASSICAL_ASYM_NAMES = ["rsa", "ecc", "ecdsa", "ecdh", "ed25519", "ed448", "x25519", "x448", "dh", "diffie-hellman", "dsa", "elgamal"];
+    const SYMMETRIC_NAMES = ["aes", "chacha", "3des", "des", "blowfish", "rc4", "sha-256", "sha-384", "sha-512", "sha-2", "sha-3", "sha1", "sha-1", "md5", "hmac", "pbkdf2", "scrypt", "argon2"];
     const WHITELIST_OIDS = [
         "1.3.6.1.4.1.2.267.12.4.4", "1.3.6.1.4.1.2.267.12.6.5", "1.3.6.1.4.1.2.267.12.8.7", "1.3.9999.6.4.16",
         "1.3.9999.6.7.16", "1.3.9999.6.4.13", "1.3.9999.6.7.13", "1.3.9999.6.5.12", "1.3.9999.6.8.12",
@@ -15,17 +17,18 @@ export function createLocalComplianceReport(cbom) {
         "1.3.9999.6.9.10", "1.3.6.1.4.1.22554.5.6.1", "1.3.6.1.4.1.22554.5.6.2", "1.3.6.1.4.1.22554.5.6.3"
     ];
 
+    // Standardized 4 Authoritative Post-Quantum Classifications
     const complianceLevels = [
-        { id: 1, label: "Not Quantum Safe", colorHex: "#fac532", icon: "WARNING" },
-        { id: 2, label: "Unknown", description: "Unknown Compliance", colorHex: "#17a9d1", icon: "UNKNOWN" },
-        { id: 3, label: "Quantum Safe", colorHex: "green", icon: "CHECKMARK_SECURE" },
-        { id: 4, label: "Not Applicable", description: "Not Applicable: we only categorize asymmetric algorithms", colorHex: "gray", icon: "NOT_APPLICABLE" }
+        { id: 1, label: "Quantum Safe", colorHex: "#24a148", icon: "CHECKMARK_SECURE" },
+        { id: 2, label: "Quantum-Weakened", colorHex: "#d97706", icon: "WARNING" },
+        { id: 3, label: "Quantum Vulnerable", colorHex: "#da1e28", icon: "ERROR" },
+        { id: 4, label: "Unknown", description: "Unknown Compliance", colorHex: "#17a9d1", icon: "UNKNOWN" }
     ];
 
     try {
         const findings = [];
-
         const components = cbom.components || [];
+
         components.forEach(component => {
             const bomRef = component["bom-ref"];
             if (!bomRef) {
@@ -37,7 +40,12 @@ export function createLocalComplianceReport(cbom) {
                 return;
             }
 
-            let unknownFindingMessage = null;
+            const rawName = component.name || "";
+            const cleanName = rawName.trim();
+            // Parent algorithm extraction for key materials
+            const parentMatch = cleanName.match(/^(.+?)[\s\-_]+(secret[\-_]?key|private[\-_]?key|public[\-_]?key|symmetric[\-_]?key|key)$/i);
+            const parentAlg = (parentMatch && parentMatch[1] && !['key','secret-key','public-key','private-key','material'].includes(parentMatch[1].toLowerCase().trim())) ? parentMatch[1].trim() : null;
+            const checkStr = (cleanName + " " + (parentAlg || "")).toLowerCase();
 
             const cryptoProperties = component.cryptoProperties;
             if (cryptoProperties) {
@@ -47,83 +55,98 @@ export function createLocalComplianceReport(cbom) {
                     if (nistQuantumSecurityLevel && nistQuantumSecurityLevel > 0) {
                         findings.push({
                             bomRef: bomRef,
-                            levelId: 3,
-                            message: "The field 'nistQuantumSecurityLevel' was set with a strictly positive value in the CBOM"
+                            levelId: 1,
+                            message: "Supported post-quantum algorithm with strictly positive NIST quantum security level (Quantum Safe)"
                         });
                         return;
                     }
 
-                    const primitive = algorithmProperties.primitive;
-                    if (primitive) {
-                        if (ASYMMETRIC_PRIMITIVES.includes(primitive) || UNKNOWN_PRIMITIVES.includes(primitive)) {
-                            const name = component.name;
-                            const oid = cryptoProperties.oid;
-                            if (oid && WHITELIST_OIDS.includes(oid)) {
-                                findings.push({
-                                    bomRef: bomRef,
-                                    levelId: 3,
-                                    message: "The OID of the asset is part of the Quantum Safe OIDs whitelist"
-                                });
-                                return;
-                            }
-                            if (name) {
-                                const lowerCaseName = name.toLowerCase();
-                                const matchedWhitelistItem = WHITELIST_NAMES.find(whitelistItem => lowerCaseName.includes(whitelistItem));
-                                if (matchedWhitelistItem) {
-                                    findings.push({
-                                        bomRef: bomRef,
-                                        levelId: 3,
-                                        message: `The name of the asset contains '${matchedWhitelistItem}', which is part of the Quantum Safe whitelist of component names`
-                                    });
-                                    return;
-                                }
-                            }
-                            if (ASYMMETRIC_PRIMITIVES.includes(primitive)) {
-                                findings.push({
-                                    bomRef: bomRef,
-                                    levelId: 1,
-                                    message: "The asset has an asymmetric primitive and does not match with the Quantum Safe whitelists of OIDs and names"
-                                });
-                                return;
-                            } else {
-                                // Primitive is part of UNKNOWN_PRIMITIVES
-                                unknownFindingMessage = "The asset primitive is unclear and does not allow further categorization";
-                            } 
-                        } else {
-                            findings.push({
-                                bomRef: bomRef,
-                                levelId: 4,
-                                message: "The asset has a symmetric primitive, so the Quantum Safe categorization is not applicable"
-                            });
-                            return;
-                        }
-                    } else {
-                        unknownFindingMessage = "The asset primitive was not set, which does not allow further categorization";
+                    const primitive = (algorithmProperties.primitive || "").toLowerCase();
+                    const oid = cryptoProperties.oid;
+                    if (oid && WHITELIST_OIDS.includes(oid)) {
+                        findings.push({
+                            bomRef: bomRef,
+                            levelId: 1,
+                            message: "The OID of the asset is part of the Quantum Safe OIDs whitelist (Quantum Safe)"
+                        });
+                        return;
                     }
-                } else {
-                    unknownFindingMessage = "The field 'algorithmProperties' was not set, which does not allow further categorization";
+
+                    // 1. Post-Quantum Cryptography -> Quantum Safe
+                    const matchedPqc = PQC_NAMES.find(p => checkStr.includes(p));
+                    if (matchedPqc) {
+                        findings.push({
+                            bomRef: bomRef,
+                            levelId: 1,
+                            message: `Recognized post-quantum cryptographic algorithm '${matchedPqc}' (Quantum Safe)`
+                        });
+                        return;
+                    }
+
+                    // 2. Classical Asymmetric -> Quantum Vulnerable (Shor's algorithm)
+                    const isClassicalAsym = ASYMMETRIC_PRIMITIVES.includes(primitive) ||
+                        CLASSICAL_ASYM_NAMES.some(p => {
+                            const re = new RegExp(`(^|[^a-z0-9])${p}([^a-z0-9]|$)`, 'i');
+                            return re.test(checkStr);
+                        });
+
+                    if (isClassicalAsym) {
+                        findings.push({
+                            bomRef: bomRef,
+                            levelId: 3,
+                            message: "Classical public-key algorithm vulnerable to polynomial-time Shor's cryptanalysis (Quantum Vulnerable)"
+                        });
+                        return;
+                    }
+
+                    // 3. Classical Symmetric & Hash Primitives -> Quantum-Weakened (Grover's algorithm)
+                    const isSymmetric = SYMMETRIC_PRIMITIVES.includes(primitive) ||
+                        SYMMETRIC_NAMES.some(p => checkStr.includes(p));
+
+                    if (isSymmetric) {
+                        findings.push({
+                            bomRef: bomRef,
+                            levelId: 2,
+                            message: "Classical symmetric cryptography or hash function; effective security reduced under quantum search (Quantum-Weakened)"
+                        });
+                        return;
+                    }
                 }
-            } else {
-                unknownFindingMessage = "The field 'cryptoProperties' was not set, which does not allow further categorization";
             }
 
-            if (unknownFindingMessage) {
+            // Fallback: Check if name indicates symmetric or asymmetric even without algorithmProperties
+            if (SYMMETRIC_NAMES.some(p => checkStr.includes(p))) {
                 findings.push({
                     bomRef: bomRef,
                     levelId: 2,
-                    message: unknownFindingMessage
+                    message: "Classical symmetric cryptography or hash function (Quantum-Weakened)"
                 });
+                return;
             }
+            if (CLASSICAL_ASYM_NAMES.some(p => checkStr.includes(p))) {
+                findings.push({
+                    bomRef: bomRef,
+                    levelId: 3,
+                    message: "Classical asymmetric cryptography (Quantum Vulnerable)"
+                });
+                return;
+            }
+
+            findings.push({
+                bomRef: bomRef,
+                levelId: 4,
+                message: "Insufficient evidence or unrecognized cryptographic construction (Unknown)"
+            });
         });
 
-        const globalComplianceStatus = findings.every(finding => finding.levelId !== 1 && finding.levelId !== 2);
+        const globalComplianceStatus = findings.every(finding => finding.levelId === 1);
 
         return {
             complianceServiceName: COMPLIANCE_SERVICE_NAME,
             policyName: POLICY_NAME,
             findings: findings,
             complianceLevels: complianceLevels,
-            defaultComplianceLevel: 2,
+            defaultComplianceLevel: 4,
             globalComplianceStatus: globalComplianceStatus,
             error: false
         };

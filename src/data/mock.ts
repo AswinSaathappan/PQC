@@ -12,7 +12,7 @@ export const applications = [
     quantumRisk: "High",
     migrationDuration: 4,
     primaryAlgorithms: ["RSA-2048", "AES-256-GCM", "TLS 1.2", "ECDSA P-256"],
-    description: "Core retail banking services — account management, payments, and transaction processing.",
+    description: "Core retail banking services - account management, payments, and transaction processing.",
   },
   {
     id: "healthcare",
@@ -55,20 +55,20 @@ export const kpis = [
 
 // ── Discovery findings ────────────────────────────────────────────────────────
 export const discoveryFindings = [
-  { id: 1, artefact: "RSA-2048", type: "Algorithm", algorithm: "RSA", version: "PKCS#1 v2.2", mode: "—", protocol: "—", source: "Source Code", location: "banking/auth/rsa.java:142", app: "Digital Banking Platform", confidence: "High" },
-  { id: 2, artefact: "AES-256-GCM", type: "Algorithm", algorithm: "AES-256", version: "FIPS 197", mode: "GCM", protocol: "—", source: "Source Code", location: "banking/payment/encrypt.java:88", app: "Digital Banking Platform", confidence: "High" },
-  { id: 3, artefact: "ECDSA P-256", type: "Algorithm", algorithm: "ECDSA", version: "FIPS 186-4", mode: "P-256", protocol: "—", source: "Source Code", location: "banking/token/sign.java:34", app: "Digital Banking Platform", confidence: "High" },
-  { id: 4, artefact: "TLS 1.2", type: "Protocol", algorithm: "TLS", version: "1.2", mode: "—", protocol: "TLS", source: "Container Image", location: "banking/gateway/Dockerfile", app: "Digital Banking Platform", confidence: "High" },
-  { id: 5, artefact: "HMAC-SHA256", type: "Algorithm", algorithm: "HMAC", version: "RFC 2104", mode: "SHA-256", protocol: "—", source: "Source Code", location: "banking/session/hmac.java:19", app: "Digital Banking Platform", confidence: "High" },
-  { id: 6, artefact: "RSA-4096", type: "Algorithm", algorithm: "RSA", version: "PKCS#1 v2.2", mode: "4096-bit", protocol: "—", source: "Source Code", location: "health/auth/PatientAuth.cs:67", app: "Healthcare Records System", confidence: "High" },
-  { id: 7, artefact: "ECC P-384", type: "Algorithm", algorithm: "ECC", version: "FIPS 186-4", mode: "P-384", protocol: "—", source: "Source Code", location: "health/crypto/KeyExchange.cs:112", app: "Healthcare Records System", confidence: "High" },
-  { id: 8, artefact: "AES-256-GCM", type: "Algorithm", algorithm: "AES-256", version: "FIPS 197", mode: "GCM", protocol: "—", source: "Source Code", location: "health/records/Encryptor.cs:88", app: "Healthcare Records System", confidence: "High" },
-  { id: 9, artefact: "TLS 1.3", type: "Protocol", algorithm: "TLS", version: "1.3", mode: "—", protocol: "TLS", source: "Container Image", location: "health/api/Dockerfile", app: "Healthcare Records System", confidence: "High" },
-  { id: 10, artefact: "SHA-512", type: "Algorithm", algorithm: "SHA-512", version: "FIPS 180-4", mode: "—", protocol: "—", source: "Source Code", location: "health/integrity/Hash.cs:45", app: "Healthcare Records System", confidence: "High" },
-  { id: 11, artefact: "ECDSA P-256", type: "Algorithm", algorithm: "ECDSA", version: "FIPS 186-4", mode: "P-256", protocol: "—", source: "Source Code", location: "ecom/orders/sign.ts:88", app: "E-Commerce Platform", confidence: "High" },
-  { id: 12, artefact: "ECDH P-256", type: "Algorithm", algorithm: "ECDH", version: "RFC 8031", mode: "P-256", protocol: "—", source: "Source Code", location: "ecom/checkout/keyex.ts:33", app: "E-Commerce Platform", confidence: "High" },
-  { id: 13, artefact: "AES-256", type: "Algorithm", algorithm: "AES-256", version: "FIPS 197", mode: "CBC", protocol: "—", source: "Source Code", location: "ecom/payments/store.ts:12", app: "E-Commerce Platform", confidence: "High" },
-  { id: 14, artefact: "TLS 1.3", type: "Protocol", algorithm: "TLS", version: "1.3", mode: "—", protocol: "TLS", source: "Container Image", location: "ecom/cdn/Dockerfile", app: "E-Commerce Platform", confidence: "High" },
+  { id: 1, artefact: "RSA-2048", type: "Algorithm", algorithm: "RSA", version: "PKCS#1 v2.2", mode: "-", protocol: "-", source: "Source Code", location: "banking/auth/rsa.java:142", app: "Digital Banking Platform", confidence: "High" },
+  { id: 2, artefact: "AES-256-GCM", type: "Algorithm", algorithm: "AES-256", version: "FIPS 197", mode: "GCM", protocol: "-", source: "Source Code", location: "banking/payment/encrypt.java:88", app: "Digital Banking Platform", confidence: "High" },
+  { id: 3, artefact: "ECDSA P-256", type: "Algorithm", algorithm: "ECDSA", version: "FIPS 186-4", mode: "P-256", protocol: "-", source: "Source Code", location: "banking/token/sign.java:34", app: "Digital Banking Platform", confidence: "High" },
+  { id: 4, artefact: "TLS 1.2", type: "Protocol", algorithm: "TLS", version: "1.2", mode: "-", protocol: "TLS", source: "Container Image", location: "banking/gateway/Dockerfile", app: "Digital Banking Platform", confidence: "High" },
+  { id: 5, artefact: "HMAC-SHA256", type: "Algorithm", algorithm: "HMAC", version: "RFC 2104", mode: "SHA-256", protocol: "-", source: "Source Code", location: "banking/session/hmac.java:19", app: "Digital Banking Platform", confidence: "High" },
+  { id: 6, artefact: "RSA-4096", type: "Algorithm", algorithm: "RSA", version: "PKCS#1 v2.2", mode: "4096-bit", protocol: "-", source: "Source Code", location: "health/auth/PatientAuth.cs:67", app: "Healthcare Records System", confidence: "High" },
+  { id: 7, artefact: "ECC P-384", type: "Algorithm", algorithm: "ECC", version: "FIPS 186-4", mode: "P-384", protocol: "-", source: "Source Code", location: "health/crypto/KeyExchange.cs:112", app: "Healthcare Records System", confidence: "High" },
+  { id: 8, artefact: "AES-256-GCM", type: "Algorithm", algorithm: "AES-256", version: "FIPS 197", mode: "GCM", protocol: "-", source: "Source Code", location: "health/records/Encryptor.cs:88", app: "Healthcare Records System", confidence: "High" },
+  { id: 9, artefact: "TLS 1.3", type: "Protocol", algorithm: "TLS", version: "1.3", mode: "-", protocol: "TLS", source: "Container Image", location: "health/api/Dockerfile", app: "Healthcare Records System", confidence: "High" },
+  { id: 10, artefact: "SHA-512", type: "Algorithm", algorithm: "SHA-512", version: "FIPS 180-4", mode: "-", protocol: "-", source: "Source Code", location: "health/integrity/Hash.cs:45", app: "Healthcare Records System", confidence: "High" },
+  { id: 11, artefact: "ECDSA P-256", type: "Algorithm", algorithm: "ECDSA", version: "FIPS 186-4", mode: "P-256", protocol: "-", source: "Source Code", location: "ecom/orders/sign.ts:88", app: "E-Commerce Platform", confidence: "High" },
+  { id: 12, artefact: "ECDH P-256", type: "Algorithm", algorithm: "ECDH", version: "RFC 8031", mode: "P-256", protocol: "-", source: "Source Code", location: "ecom/checkout/keyex.ts:33", app: "E-Commerce Platform", confidence: "High" },
+  { id: 13, artefact: "AES-256", type: "Algorithm", algorithm: "AES-256", version: "FIPS 197", mode: "CBC", protocol: "-", source: "Source Code", location: "ecom/payments/store.ts:12", app: "E-Commerce Platform", confidence: "High" },
+  { id: 14, artefact: "TLS 1.3", type: "Protocol", algorithm: "TLS", version: "1.3", mode: "-", protocol: "TLS", source: "Container Image", location: "ecom/cdn/Dockerfile", app: "E-Commerce Platform", confidence: "High" },
 ];
 
 // ── CBOM matrix ───────────────────────────────────────────────────────────────
@@ -112,7 +112,7 @@ export const classificationData = [
 ];
 
 // ── Per-app cryptographic asset priority data ─────────────────────────────────
-// Priority is within each application's own cryptographic assets — not cross-app ranking.
+// Priority is within each application's own cryptographic assets - not cross-app ranking.
 export interface AssetPriority {
   rank: number;
   asset: string;

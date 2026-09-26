@@ -81,6 +81,14 @@ export function connectAndScan(gitBranch, gitSubfolder, credentials) {
     console.log("connectAndScan skipped: in folder, binary, or container mode");
     return;
   }
+  if (typeof window !== "undefined" && typeof window.__startGitScan === "function") {
+    const searchInput = document.querySelector('.search-bar input.bx--search-input');
+    const val = (searchInput ? searchInput.value : '') || (model && model.codeOrigin && model.codeOrigin.scanUrl) || '';
+    if (val && val.trim().length > 0) {
+      window.__startGitScan(val.trim());
+      return;
+    }
+  }
   model.resetScanningInfo();
   setCodeOrigin(gitBranch, gitSubfolder);
   setCredentials(credentials)

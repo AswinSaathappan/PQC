@@ -69,12 +69,17 @@ export default function NewAnalysis({ onComplete, onNavigate, onSelectAnalysis, 
       }
       const analysis = await res.json();
 
+      console.log(`[CRYPTAVISTA] analysis created: ${analysis.analysisId}`);
+      console.log(`[CRYPTAVISTA] input type: ${payload.targetType}`);
+      console.log(`[CRYPTAVISTA] discovery started: ${analysis.analysisId}`);
+
       if (onSelectAnalysis && analysis?.analysisId) {
         onSelectAnalysis(analysis.analysisId);
       }
       try {
         if (analysis?.analysisId) {
           localStorage.setItem("cryptavista_selected_analysis_id", analysis.analysisId);
+          localStorage.setItem(`cryptavista_target_type_${analysis.analysisId}`, payload.targetType);
         }
       } catch { }
       if (refreshAnalyses && analysis?.analysisId) {

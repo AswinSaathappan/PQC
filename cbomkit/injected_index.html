@@ -1,0 +1,1842 @@
+<!doctype html><html lang=""><head><meta charset="utf-8"/><meta http-equiv="X-UA-Compatible" content="IE=edge"/><meta name="viewport" content="width=device-width,initial-scale=1"/><meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate"/><meta http-equiv="Pragma" content="no-cache"/><meta http-equiv="Expires" content="0"/><link rel="icon" href="/favicon.ico"/><title>CBOM</title><script>
+if (!('process' in window)) {
+  window.process = {};
+}
+
+(function() {
+  window.__STANDARDIZED_COMPLIANCE_LEVELS = [
+    { id: 1, label: "Quantum Safe", colorHex: "#24a148", icon: "CHECKMARK_SECURE" },
+    { id: 2, label: "Quantum-Weakened", colorHex: "#d97706", icon: "WARNING" },
+    { id: 3, label: "Quantum Vulnerable", colorHex: "#da1e28", icon: "ERROR" },
+    { id: 4, label: "Unknown", description: "Unknown Compliance", colorHex: "#17a9d1", icon: "UNKNOWN" }
+  ];
+
+  window.__normalizeAssetClassification = function(a) {
+    if (!a) return 'Unknown';
+    if (a.cryptographicClassification) return a.cryptographicClassification;
+    if (a.quantumClassification) return a.quantumClassification;
+
+    if (a.cryptavistaQuantumClassification) {
+      var u = a.cryptavistaQuantumClassification.toUpperCase();
+      if (u === 'QUANTUM_SAFE') return 'Quantum Safe';
+      if (u === 'NOT_QUANTUM_SAFE') return 'Quantum Vulnerable';
+      if (u === 'QUANTUM_RESISTANT') return 'Quantum-Weakened';
+      if (u === 'UNKNOWN') return 'Unknown';
+    }
+
+    var name = (a.assetName || a.asset || a.name || '').trim();
+    var alg = (a.algorithm || name).trim();
+    var cp = a.cryptoProperties || {};
+    var ap = cp.algorithmProperties || {};
+    var prim = (ap.primitive || a.primitive || a.usage || '').toLowerCase();
+
+    var parentMatch = name.match(/^(.+?)[\s\-_]+(secret[\-_]?key|private[\-_]?key|public[\-_]?key|symmetric[\-_]?key|key)$/i);
+    var parentAlg = (parentMatch && parentMatch[1] && !['key','secret-key','public-key','private-key','material'].includes(parentMatch[1].toLowerCase().trim())) ? parentMatch[1].trim() : null;
+    var targetCheck = (name + ' ' + alg + ' ' + (parentAlg || '')).toUpperCase();
+
+    var pqcPatterns = ['ML-KEM', 'ML-DSA', 'SLH-DSA', 'FALCON', 'SPHINCS', 'KYBER', 'DILITHIUM', 'XMSS', 'LMS', 'BIKE', 'HQC', 'FRODOKEM', 'MCELIECE', 'NTRU', 'PQXDH', 'CRYSTALS', 'MAYO'];
+    var classicalAsymPatterns = ['RSA', 'ECC', 'ECDSA', 'ECDH', 'ED25519', 'ED448', 'X25519', 'X448', 'DH', 'DIFFIE-HELLMAN', 'DSA', 'ELGAMAL'];
+    var symmetricPatterns = ['AES', 'CHACHA', '3DES', 'DES', 'BLOWFISH', 'RC4', 'SHA-256', 'SHA-384', 'SHA-512', 'SHA-2', 'SHA-3', 'SHA1', 'SHA-1', 'MD5', 'HMAC', 'PBKDF2', 'SCRYPT', 'ARGON2'];
+
+    if (ap.nistQuantumSecurityLevel && Number(ap.nistQuantumSecurityLevel) > 0) return 'Quantum Safe';
+    if (pqcPatterns.some(function(p) { return targetCheck.indexOf(p) !== -1; })) return 'Quantum Safe';
+
+    var isAsym = classicalAsymPatterns.some(function(p) {
+      var re = new RegExp('(^|[^A-Z0-9])' + p + '([^A-Z0-9]|$)', 'i');
+      return re.test(targetCheck);
+    }) || prim === 'pke' || prim === 'signature' || prim === 'key-agree' || prim === 'kem';
+    if (isAsym) return 'Quantum Vulnerable';
+
+    var isSym = symmetricPatterns.some(function(p) { return targetCheck.indexOf(p) !== -1; }) ||
+      prim === 'block-cipher' || prim === 'stream-cipher' || prim === 'hash' ||
+      prim === 'digest' || prim === 'mac' || prim === 'kdf';
+    if (isSym) return 'Quantum-Weakened';
+
+    return 'Unknown';
+  };
+
+  window.__normalizeQuantumClassification = function(component, assetsMap) {
+    if (!component) return 'Unknown';
+    var bomRef = component["bom-ref"];
+    var rawName = component.name || '';
+    var cleanName = rawName.trim();
+    var baseName = (cleanName.indexOf('@') !== -1) ? cleanName.split('@')[0].trim() : cleanName;
+
+    var map = assetsMap || window.__currentAssetsMap;
+    if (map) {
+      if (bomRef && map[bomRef]) return map[bomRef];
+      if (cleanName && map[cleanName.toLowerCase()]) return map[cleanName.toLowerCase()];
+      if (baseName && map[baseName.toLowerCase()]) return map[baseName.toLowerCase()];
+    }
+
+    return window.__normalizeAssetClassification(component);
+  };
+
+  window.__createStandardizedComplianceReport = function(cbom) {
+    var findings = [];
+    var components = (cbom && Array.isArray(cbom.components)) ? cbom.components : [];
+    components.forEach(function(component) {
+      var bomRef = component["bom-ref"];
+      if (!bomRef) return;
+      if (component.type && component.type !== "cryptographic-asset") return;
+
+      var classification = window.__normalizeQuantumClassification(component, window.__currentAssetsMap);
+      var levelId = 4;
+      var message = "Insufficient evidence or unrecognized cryptographic primitive (Unknown)";
+
+      if (classification === 'Quantum Safe') {
+        levelId = 1;
+        message = "Supported post-quantum cryptographic algorithm resilient to quantum cryptanalysis (Quantum Safe)";
+      } else if (classification === 'Quantum-Weakened') {
+        levelId = 2;
+        message = "Classical symmetric cryptography or hash function; effective security halved under Grover's search (Quantum-Weakened)";
+      } else if (classification === 'Quantum Vulnerable') {
+        levelId = 3;
+        message = "Classical public-key algorithm vulnerable to polynomial-time Shor's cryptanalysis (Quantum Vulnerable)";
+      }
+
+      findings.push({ bomRef: bomRef, levelId: levelId, message: message });
+    });
+
+    var globalComplianceStatus = findings.length > 0 && findings.every(function(f) { return f.levelId === 1; });
+    return {
+      complianceServiceName: "CRYPTAVISTA Quantum Risk Classification",
+      policyName: "CRYPTAVISTA Post-Quantum Cryptography",
+      findings: findings,
+      complianceLevels: window.__STANDARDIZED_COMPLIANCE_LEVELS,
+      defaultComplianceLevel: 4,
+      globalComplianceStatus: globalComplianceStatus,
+      error: false
+    };
+  };
+
+  window.__getStandardizedComplianceData = function(model) {
+    var m = model || window.cbomModel || window.model;
+    if (!m || !m.cbom) return [];
+
+    var qsCount = 0;
+    var qwCount = 0;
+    var qvCount = 0;
+    var unkCount = 0;
+
+    var components = (m.cbom && Array.isArray(m.cbom.components)) ? m.cbom.components : [];
+    components.forEach(function(c) {
+      if (!c) return;
+      if (c.type && c.type !== 'cryptographic-asset') return;
+
+      var occWeight = (c.evidence && Array.isArray(c.evidence.occurrences) && c.evidence.occurrences.length > 0)
+        ? c.evidence.occurrences.length
+        : 1;
+
+      var cls = window.__normalizeQuantumClassification(c, window.__currentAssetsMap);
+      if (cls === 'Quantum Safe') {
+        qsCount += occWeight;
+      } else if (cls === 'Quantum-Weakened') {
+        qwCount += occWeight;
+      } else if (cls === 'Quantum Vulnerable') {
+        qvCount += occWeight;
+      } else {
+        unkCount += occWeight;
+      }
+    });
+
+    var total = qsCount + qwCount + qvCount + unkCount;
+    if (total === 0) return [];
+
+    var res = [];
+    if (qsCount > 0) res.push({ group: "Quantum Safe", value: qsCount });
+    if (qwCount > 0) res.push({ group: "Quantum-Weakened", value: qwCount });
+    if (qvCount > 0) res.push({ group: "Quantum Vulnerable", value: qvCount });
+    if (unkCount > 0) res.push({ group: "Unknown", value: unkCount });
+    if (res.length === 0 && total > 0) {
+      res.push({ group: "Unknown", value: total });
+    }
+    return res;
+  };
+
+  window.__getStandardizedComplianceOptions = function(model) {
+    var isDark = model && model.useDarkMode;
+    var data = window.__getStandardizedComplianceData(model);
+    var scale = {};
+    var colorMap = {
+      "Quantum Safe": "#24a148",
+      "Quantum-Weakened": "#d97706",
+      "Quantum Vulnerable": "#da1e28",
+      "Unknown": "#17a9d1"
+    };
+    data.forEach(function(d) {
+      scale[d.group] = colorMap[d.group] || "#17a9d1";
+    });
+    return {
+      resizable: true,
+      donut: {
+        center: {
+          label: "Crypto Assets"
+        },
+        alignment: "center"
+      },
+      height: "320px",
+      toolbar: { enabled: false },
+      theme: isDark ? "g100" : "white",
+      color: {
+        scale: scale
+      },
+      legend: {
+        alignment: "center"
+      }
+    };
+  };
+
+  window.__installModelGuard = function(m) {
+    if (!m) return;
+    if (m.cbom && (!m.policyCheckResult || m.policyCheckResult.error || (m.policyCheckResult.complianceLevels && m.policyCheckResult.complianceLevels.some(function(l) { return l.label === 'Not Applicable' || l.label === 'Not Quantum Safe'; })))) {
+      m.policyCheckResult = window.__createStandardizedComplianceReport(m.cbom);
+    }
+  };
+
+  // Intercept fetch calls to backend compliance checking
+  var origFetch = window.fetch;
+  window.fetch = function(url, options) {
+    var urlStr = (url || '').toString();
+    if (urlStr.indexOf('/api/v1/compliance/check') !== -1 || urlStr.indexOf('policyIdentifier=') !== -1) {
+      var m = window.cbomModel || window.model;
+      var cbom = null;
+      if (options && options.body) {
+        try { cbom = JSON.parse(options.body); } catch(e) {}
+      }
+      if (!cbom && m) cbom = m.cbom;
+      var report = window.__createStandardizedComplianceReport(cbom);
+      return Promise.resolve(new Response(JSON.stringify(report), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' }
+      }));
+    }
+    return origFetch.apply(this, arguments);
+  };
+
+  setInterval(function() {
+    var m = window.cbomModel || window.model;
+    if (m) window.__installModelGuard(m);
+  }, 200);
+})();
+</script><script defer="defer" src="/js/chunk-vendors.30a2b461.js?v=20260925v2"></script><script defer="defer" src="/js/app.658baae5.js?v=20260925v2"></script><link href="/css/chunk-vendors.ecf2b69a.css?v=20260925v2" rel="stylesheet"><link href="/css/app.217b119b.css?v=20260925v2" rel="stylesheet">
+<style id="hide-cbom-footer">
+  footer, c4d-footer-container, c4d-footer, .bx--footer, .c4d--footer, [size="short"] {
+    display: none !important;
+    visibility: hidden !important;
+    height: 0 !important;
+    max-height: 0 !important;
+    overflow: hidden !important;
+  }
+  .search-button.folder-enabled,
+  .search-button:not([disabled]) {
+    cursor: pointer !important;
+    pointer-events: auto !important;
+    opacity: 1 !important;
+  }
+  .folder-plus-icon,
+  .binary-box-icon {
+    width: 16px !important;
+    height: 16px !important;
+    fill: currentColor !important;
+    display: inline-block !important;
+    vertical-align: middle !important;
+    pointer-events: none !important;
+  }
+  /* Suppress compliance toast notifications */
+  .bx--toast-notification[title*="Limited compliance"],
+  .cds--toast-notification[title*="Limited compliance"],
+  .bx--toast-notification:has([title*="Limited compliance"]),
+  .cds--toast-notification:has([title*="Limited compliance"]),
+  .notificationContainer:has([title*="Limited compliance"]) {
+    display: none !important;
+    visibility: hidden !important;
+    height: 0 !important;
+    max-height: 0 !important;
+    overflow: hidden !important;
+    pointer-events: none !important;
+  }
+
+  /* 1. Remove yellow "Not compliant" banner and any compliance notification banner */
+  .bx--inline-notification,
+  .cds--inline-notification,
+  .bx--inline-notification--warning,
+  .cds--inline-notification--warning,
+  .bx--inline-notification--error,
+  .cds--inline-notification--error,
+  .bx--inline-notification--info,
+  .cds--inline-notification--info,
+  cv-inline-notification,
+  .skeleton-bordered:has(h6) {
+    display: none !important;
+    visibility: hidden !important;
+    height: 0 !important;
+    max-height: 0 !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    border: none !important;
+    overflow: hidden !important;
+    pointer-events: none !important;
+  }
+
+  /* 2. Remove red "Invalid CBOM" alert and toast notifications */
+  .bx--toast-notification[title*="Invalid CBOM"],
+  .cds--toast-notification[title*="Invalid CBOM"],
+  .bx--toast-notification:has([title*="Invalid CBOM"]),
+  .cds--toast-notification:has([title*="Invalid CBOM"]),
+  .notificationContainer:has([title*="Invalid CBOM"]),
+  .bx--toast-notification:has(.bx--toast-notification__title:empty),
+  .cds--toast-notification:has(.cds--toast-notification__title:empty) {
+    display: none !important;
+    visibility: hidden !important;
+    height: 0 !important;
+    max-height: 0 !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    overflow: hidden !important;
+    pointer-events: none !important;
+  }
+
+  /* Optimize HomeView layout for embedded iframe */
+  .main > div[style*="padding: 60px"],
+  .main > div[style*="padding:60px"] {
+    padding: 12px 4% 8px !important;
+  }
+  .search-or-upload-view {
+    display: flex !important;
+    flex-direction: column !important;
+    margin-top: 4px !important;
+    margin-bottom: 16px !important;
+  }
+  .search-or-upload-view > div[style*="display: flex"],
+  .search-or-upload-view > div:has(.card-container) {
+    order: -1 !important;
+    margin-bottom: 20px !important;
+  }
+  .search-or-upload-view > .list-table {
+    order: 2 !important;
+  }
+
+  /* Hide advanced options in folder & binary mode */
+  body.binary-mode-active .filter-checkbox,
+  body.folder-mode-active .filter-checkbox {
+    display: none !important;
+  }
+
+  /* Custom dropzone styling for Folder and Binary input modes */
+  .custom-dropzone-wrapper {
+    margin-bottom: 8px;
+    width: 100%;
+  }
+  .custom-dropzone-box {
+    border: 1px dashed var(--cds-border-strong, #525252);
+    background-color: var(--cds-layer, #262626);
+    border-radius: 4px;
+    padding: 22px 16px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    cursor: pointer;
+    position: relative;
+    transition: all 0.15s ease-in-out;
+    min-height: 80px;
+    box-sizing: border-box;
+    width: 100%;
+  }
+  .custom-dropzone-box:hover,
+  .custom-dropzone-box.drag-over {
+    border-color: #0f62fe !important;
+    background-color: rgba(15, 98, 254, 0.08) !important;
+  }
+  .custom-dropzone-box input[type="file"] {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    opacity: 0;
+    cursor: pointer;
+    z-index: 10;
+  }
+  .custom-dropzone-header {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    font-size: 15px;
+    font-weight: 500;
+    color: var(--cds-text-primary, #f4f4f4);
+  }
+  .custom-dropzone-header svg {
+    width: 22px;
+    height: 22px;
+    fill: currentColor;
+    flex-shrink: 0;
+  }
+  .custom-dropzone-subheader {
+    font-size: 12px;
+    color: var(--cds-text-secondary, #a8a8a8);
+    margin-top: 4px;
+  }
+  .custom-selected-info-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 8px 12px;
+    background: rgba(15, 98, 254, 0.12);
+    border: 1px solid rgba(15, 98, 254, 0.35);
+    border-radius: 4px;
+    font-size: 12px;
+    color: var(--cds-text-primary, #f4f4f4);
+    margin-top: 10px;
+  }
+  .custom-scan-button-row {
+    display: flex;
+    justify-content: flex-end;
+    margin-top: 12px;
+  }
+  .custom-scan-btn {
+    min-width: 110px;
+    height: 48px;
+    font-size: 14px;
+    font-weight: 500;
+    color: #ffffff;
+    background-color: #0f62fe;
+    border: none;
+    border-radius: 0;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 16px;
+    transition: background-color 0.15s ease;
+  }
+  .custom-scan-btn:hover:not(:disabled) {
+    background-color: #0353e9;
+  }
+  .custom-scan-btn:disabled {
+    background-color: #393939;
+    color: #8d8d8d;
+    cursor: not-allowed;
+  }
+  .custom-scan-btn svg {
+    margin-left: 12px;
+    fill: currentColor;
+    width: 16px;
+    height: 16px;
+  }
+
+</style>
+</head><body><noscript><strong>We're sorry but frontend doesn't work properly without JavaScript enabled. Please enable it to continue.</strong></noscript><div id="app"></div>
+<script src="/js/jszip.min.js"></script>
+<script>
+(function() {
+  var urlParams = new URLSearchParams(window.location.search);
+  var currentAnalysisId = urlParams.get('analysisId') || '';
+  var targetTypeParam = urlParams.get('targetType') || '';
+  var sourceTypeParam = urlParams.get('sourceType') || '';
+
+  window.__targetType = targetTypeParam;
+  window.__sourceType = sourceTypeParam;
+
+  window.__loadAnalysis = function(id) {
+    if (id) currentAnalysisId = id;
+    checkBackendAnalysisType();
+  };
+  window.__hasBinarySelected = false;
+  window.__selectedFolderFiles = [];
+  window.__selectedFolderName = '';
+  window.__selectedBinaryFile = null;
+  window.__selectedBinaryName = '';
+
+  var isScanning = false;
+  var livePollTimer = null;
+
+  var addAltSvg = '<svg focusable="false" preserveAspectRatio="xMidYMid meet" xmlns="http://www.w3.org/2000/svg" fill="currentColor" aria-hidden="true" width="24" height="24" viewBox="0 0 32 32"><path d="M17 15 17 8 15 8 15 15 8 15 8 17 15 17 15 24 17 24 17 17 24 17 24 15z"></path><path d="M16 2a14 14 0 1 0 14 14A14 14 0 0 0 16 2zm0 26a12 12 0 1 1 12-12 12 12 0 0 1-12 12z"></path></svg>';
+  var folderSvg = '<svg focusable="false" preserveAspectRatio="xMidYMid meet" xmlns="http://www.w3.org/2000/svg" fill="currentColor" aria-hidden="true" width="24" height="24" viewBox="0 0 32 32"><path d="M28 8h-9.586l-2.707-2.707A2 2 0 0 0 14.293 4.707H4a2 2 0 0 0-2 2v18a2 2 0 0 0 2 2h24a2 2 0 0 0 2-2V10a2 2 0 0 0-2-2zm0 16.707H4V6.707h9.586l2.707 2.707A2 2 0 0 0 17.707 10H28z"></path></svg>';
+  var binarySvg = '<svg focusable="false" preserveAspectRatio="xMidYMid meet" xmlns="http://www.w3.org/2000/svg" fill="currentColor" aria-hidden="true" width="24" height="24" viewBox="0 0 32 32"><path d="m16 2.05-13 7.5v14.9l13 7.5 13-7.5v-14.9zm-1 2.31v6.86L4.35 17 3.5 16.5zm2 0 11.5 6.64-.85.5-10.65-5.8zm-13 14.88 11 6v6.86l-11-6.35zm13 12.86v-6.86l11-6v6.35z"></path></svg>';
+  var arrowRightSvg = '<svg focusable="false" preserveAspectRatio="xMidYMid meet" xmlns="http://www.w3.org/2000/svg" fill="currentColor" aria-hidden="true" width="16" height="16" viewBox="0 0 32 32"><path d="m18 6-1.43 1.393L24.15 15H4v2h20.15l-7.58 7.573L18 26l10-10L18 6z"></path></svg>';
+
+  function resolveCurrentMode() {
+    var p = new URLSearchParams(window.location.search);
+    var s = (window.__sourceType || p.get('sourceType') || '').toUpperCase();
+    var t = (window.__targetType || p.get('targetType') || '').toLowerCase();
+
+    if (s === 'PROJECT_FOLDER' || t === 'folder') return 'folder';
+    if (s === 'BINARY_LIBRARY' || t === 'binary') return 'binary';
+    if (s === 'CONTAINER_IMAGE' || t === 'container') return 'container';
+    if (s === 'GIT_REPOSITORY' || t === 'git' || t === 'source_code' || t === 'source') return 'git';
+
+    if (!s && currentAnalysisId) {
+      try {
+        s = (localStorage.getItem('cryptavista_source_type_' + currentAnalysisId) || '').toUpperCase();
+      } catch(e) {}
+    }
+    if (!t && currentAnalysisId) {
+      try {
+        t = (localStorage.getItem('cryptavista_target_type_' + currentAnalysisId) || '').toLowerCase();
+      } catch(e) {}
+    }
+
+    if (s === 'PROJECT_FOLDER' || t === 'folder') return 'folder';
+    if (s === 'BINARY_LIBRARY' || t === 'binary') return 'binary';
+    if (s === 'CONTAINER_IMAGE' || t === 'container') return 'container';
+    return 'git';
+  }
+
+  function formatFileSize(bytes) {
+    if (!bytes || bytes === 0) return '0 B';
+    if (bytes >= 1048576) return (bytes / 1048576).toFixed(2) + ' MB';
+    if (bytes >= 1024) return (bytes / 1024).toFixed(1) + ' KB';
+    return bytes + ' B';
+  }
+
+  function updateBrandTitle() {
+    try {
+      var prefixes = document.querySelectorAll('.bx--header__name--prefix, .cv-header-name, .bx--header__name');
+      prefixes.forEach(function(el) {
+        if (el.classList && el.classList.contains('bx--header__name--prefix')) {
+          if (el.textContent && el.textContent.trim() !== 'CBOM') {
+            el.textContent = 'CBOM';
+          }
+        } else if (el.classList && el.classList.contains('bx--header__name')) {
+          for (var i = 0; i < el.childNodes.length; i++) {
+            var child = el.childNodes[i];
+            if (child.nodeType === Node.TEXT_NODE && child.nodeValue && child.nodeValue.toLowerCase().indexOf('kit') !== -1) {
+              child.nodeValue = child.nodeValue.replace(/kit/gi, '').trim();
+            }
+          }
+        }
+      });
+      var headings = document.querySelectorAll('.heading-inner h1, .heading-outer h1');
+      headings.forEach(function(h1) {
+        if (h1.textContent && h1.textContent.trim() !== 'CBOM') {
+          h1.textContent = 'CBOM';
+        }
+      });
+    } catch (e) {}
+  }
+
+  function setAuthoritativeAssets(assets) {
+    if (!assets || !Array.isArray(assets)) return;
+    window.__currentAssets = assets;
+    var map = {};
+    assets.forEach(function(a) {
+      var normCls = window.__normalizeAssetClassification(a);
+      if (a.bomRef) map[a.bomRef] = normCls;
+      if (a.assetId) map[a.assetId] = normCls;
+      if (a.assetName) {
+        map[a.assetName.toLowerCase().trim()] = normCls;
+        if (a.assetName.indexOf('@') !== -1) {
+          map[a.assetName.split('@')[0].toLowerCase().trim()] = normCls;
+        }
+      }
+      if (a.algorithm) map[a.algorithm.toLowerCase().trim()] = normCls;
+      if (a.name) map[a.name.toLowerCase().trim()] = normCls;
+    });
+    window.__currentAssetsMap = map;
+    var m = window.cbomModel || window.model;
+    if (m && m.cbom) {
+      createAndSetLocalCompliance(m.cbom, m);
+    }
+  }
+
+  function createAndSetLocalCompliance(cbom, model) {
+    if (!cbom || !model) return;
+    try {
+      model.policyCheckResult = window.__createStandardizedComplianceReport(cbom);
+    } catch (e) {
+      console.warn("Local compliance calculation note:", e);
+    }
+  }
+
+  window.__isScanningActive = false;
+  window.__isAnalysisCompleted = false;
+
+  function updateScanningSubtitle() {
+    try {
+      var m = window.cbomModel || window.model;
+      var hasDetections = m && ((m.cbom && Array.isArray(m.cbom.components) && m.cbom.components.length > 0) || (m.scanning && Array.isArray(m.scanning.liveDetections) && m.scanning.liveDetections.length > 0));
+      var isScanningNow = isScanning || window.__isScanningActive || (m && m.scanning && (m.scanning.isScanning || m.scanning.scanningStatus === 'scanning' || m.scanning.scanningStatus === 'loading')) || !window.__isAnalysisCompleted;
+      if (!hasDetections && isScanningNow) {
+        var subtitles = document.querySelectorAll('.cv-tile h4, .main h4, h4');
+        subtitles.forEach(function(h4) {
+          var txt = (h4.textContent || '').trim();
+          if (txt === 'No cryptographic asset has been found.' || txt === 'Scanning code for cryptographic assets...' || txt.indexOf('No cryptographic asset') !== -1) {
+            h4.textContent = 'Scanning (just a second)...';
+          }
+        });
+      }
+    } catch(e) {}
+  }
+
+  try {
+    if (typeof MutationObserver !== 'undefined') {
+      var subObserver = new MutationObserver(function() {
+        updateScanningSubtitle();
+      });
+      subObserver.observe(document.documentElement || document.body, { childList: true, subtree: true, characterData: true });
+    }
+  } catch(e) {}
+  setInterval(updateScanningSubtitle, 100);
+
+  function enterScanningState(displayName) {
+    isScanning = true;
+    window.__isScanningActive = true;
+    window.__isAnalysisCompleted = false;
+    var m = window.cbomModel || window.model;
+    if (m) {
+      m.useDarkMode = true;
+      m.showResults = true;
+      if (m.scanning) {
+        m.scanning.isScanning = false;
+        m.scanning.scanningStatus = 'scanning';
+      }
+      var effectiveName = displayName || window.__selectedFolderName || window.__selectedBinaryName || 'project';
+      if (m.codeOrigin) {
+        m.codeOrigin.projectIdentifier = effectiveName;
+        var curMode = resolveCurrentMode();
+        if (curMode === 'git' || (effectiveName && (effectiveName.startsWith('http') || effectiveName.includes('.git') || effectiveName.includes('github') || effectiveName.includes('gitlab')))) {
+          m.codeOrigin.gitUrl = effectiveName;
+          m.codeOrigin.uploadedFileName = null;
+        }
+      }
+      if (!m.cbom) {
+        m.cbom = {
+          bomFormat: "CycloneDX",
+          specVersion: "1.6",
+          metadata: { component: { name: effectiveName, type: "application" } },
+          components: [],
+          dependencies: []
+        };
+      }
+    }
+    updateScanningSubtitle();
+  }
+
+  function extractDetectionsFromCbom(cbom) {
+    if (!cbom || !Array.isArray(cbom.components)) return [];
+    var detections = [];
+    cbom.components.forEach(function (c) {
+      if (c && (c.type === "cryptographic-asset" || !c.type || c.cryptoProperties)) {
+        if (c.evidence && Array.isArray(c.evidence.occurrences) && c.evidence.occurrences.length > 0) {
+          c.evidence.occurrences.forEach(function (occ) {
+            var single = JSON.parse(JSON.stringify(c));
+            single.evidence.occurrences = [occ];
+            detections.push(single);
+          });
+        } else {
+          detections.push(c);
+        }
+      }
+    });
+    return detections;
+  }
+
+  var lastRenderedCbomSignature = '';
+  function updateLiveVueCbom(cbomJson, uploadName, isLiveScanning) {
+    if (!cbomJson || !Array.isArray(cbomJson.components)) {
+      return false;
+    }
+
+    var m = window.cbomModel || window.model;
+    if (!m) return false;
+
+    var totalOccurrences = cbomJson.components.reduce(function(acc, c) {
+      return acc + ((c.evidence && c.evidence.occurrences) ? c.evidence.occurrences.length : 1);
+    }, 0);
+    var lastRef = cbomJson.components.length > 0 ? (cbomJson.components[cbomJson.components.length - 1]['bom-ref'] || '') : 'empty';
+    var signature = currentAnalysisId + ':' + cbomJson.components.length + ':' + totalOccurrences + ':' + lastRef + ':' + (isLiveScanning ? 'scan' : 'done');
+    if (signature === lastRenderedCbomSignature) {
+      return false;
+    }
+    lastRenderedCbomSignature = signature;
+
+    var effectiveName = uploadName || (cbomJson.metadata && cbomJson.metadata.component && cbomJson.metadata.component.name) || window.__selectedFolderName || window.__selectedBinaryName || 'project';
+    var curMode = resolveCurrentMode();
+
+    if (m.codeOrigin) {
+      if (curMode === 'git' || (effectiveName && (effectiveName.startsWith('http') || effectiveName.includes('.git')))) {
+        m.codeOrigin.gitUrl = effectiveName;
+        m.codeOrigin.uploadedFileName = null;
+        m.codeOrigin.projectIdentifier = effectiveName;
+      } else if (curMode === 'folder' || curMode === 'binary') {
+        m.codeOrigin.gitUrl = null;
+        m.codeOrigin.uploadedFileName = effectiveName;
+        m.codeOrigin.projectIdentifier = effectiveName;
+      } else {
+        m.codeOrigin.gitUrl = null;
+        m.codeOrigin.uploadedFileName = null;
+        m.codeOrigin.projectIdentifier = effectiveName;
+      }
+    }
+
+    m.useDarkMode = true;
+    if (typeof window.showResultFromUpload === 'function') {
+      window.showResultFromUpload(cbomJson, effectiveName);
+    } else {
+      m.cbom = cbomJson;
+      m.showResults = true;
+    }
+
+    if (curMode === 'git') {
+      m.codeOrigin.uploadedFileName = null;
+      m.codeOrigin.gitUrl = effectiveName;
+      m.codeOrigin.projectIdentifier = effectiveName;
+    }
+
+    if (m.scanning) {
+      m.scanning.isScanning = false;
+      m.scanning.scanningStatus = isLiveScanning ? 'scanning' : 'loaded';
+      m.scanning.liveDetections = extractDetectionsFromCbom(cbomJson);
+    }
+
+    createAndSetLocalCompliance(cbomJson, m);
+    return true;
+  }
+
+  function startLivePolling() {
+    if (livePollTimer || !currentAnalysisId) return;
+    var pollCycle = async function() {
+      try {
+        var statusRes = await fetch('http://localhost:3001/api/analyses/' + encodeURIComponent(currentAnalysisId) + '/status');
+        if (statusRes.ok) {
+          var st = await statusRes.json();
+          var m = window.cbomModel || window.model;
+
+          if (st.status === 'RUNNING') {
+            var curMode = resolveCurrentMode();
+            var runningName = (curMode === 'git' && (window.__lastScannedGitUrl || st.repositoryUrl)) ? (window.__lastScannedGitUrl || st.repositoryUrl) : (st.applicationName || st.repositoryUrl);
+            enterScanningState(runningName);
+            applyModeIfNeeded();
+
+            var cbomRes = await fetch('http://localhost:3001/api/analyses/' + encodeURIComponent(currentAnalysisId) + '/cbom').catch(function() { return null; });
+            if (cbomRes && cbomRes.ok) {
+              var cbomData = await cbomRes.json();
+              if (cbomData && Array.isArray(cbomData.components)) {
+                var compName = (cbomData.metadata && cbomData.metadata.component && cbomData.metadata.component.name);
+                var effName = (curMode === 'git' && (window.__lastScannedGitUrl || st.repositoryUrl || compName)) ? (window.__lastScannedGitUrl || st.repositoryUrl || compName) : (compName || st.applicationName || st.repositoryUrl || window.__selectedFolderName || window.__selectedBinaryName || 'project');
+                updateLiveVueCbom(cbomData, effName, true);
+              }
+            }
+          } else if (st.status === 'COMPLETED') {
+            clearInterval(livePollTimer);
+            livePollTimer = null;
+            isScanning = false;
+            window.__isScanningActive = false;
+            window.__isAnalysisCompleted = true;
+            
+            try {
+              var assetsRes = await fetch('http://localhost:3001/api/analyses/' + encodeURIComponent(currentAnalysisId) + '/assets');
+              if (assetsRes.ok) {
+                var assets = await assetsRes.json();
+                if (assets) setAuthoritativeAssets(assets);
+              }
+            } catch(e) {}
+
+            var finalRes = await fetch('http://localhost:3001/api/analyses/' + encodeURIComponent(currentAnalysisId) + '/cbom').catch(function() { return null; });
+            if (finalRes && finalRes.ok) {
+              var finalData = await finalRes.json();
+              var finalCompName = (finalData.metadata && finalData.metadata.component && finalData.metadata.component.name);
+              var curMode = resolveCurrentMode();
+              var finalEffName = (curMode === 'git' && (window.__lastScannedGitUrl || st.repositoryUrl || finalCompName)) ? (window.__lastScannedGitUrl || st.repositoryUrl || finalCompName) : (finalCompName || st.applicationName || st.repositoryUrl || window.__selectedFolderName || window.__selectedBinaryName || 'project');
+              console.log('[CRYPTAVISTA] CBOM generated: ' + currentAnalysisId);
+              console.log('[CRYPTAVISTA] CBOM loaded: ' + currentAnalysisId);
+              updateLiveVueCbom(finalData, finalEffName, false);
+            }
+            applyModeIfNeeded();
+          } else if (st.status === 'FAILED') {
+            clearInterval(livePollTimer);
+            livePollTimer = null;
+            isScanning = false;
+            window.__isScanningActive = false;
+            applyModeIfNeeded();
+            if (m && m.scanning) {
+              m.scanning.isScanning = false;
+              m.scanning.scanningStatus = 'error';
+            }
+          } else if (st.status === 'CREATED' || st.status === 'WAITING_FOR_INPUT') {
+            // Waiting for user input; do not reset model or erase user's typed input
+            isScanning = false;
+          }
+        }
+      } catch (e) {}
+    };
+    pollCycle();
+    livePollTimer = setInterval(pollCycle, 500);
+  }
+
+  function resetVueModel(forceClearInput) {
+    isScanning = false;
+    window.__isScanningActive = false;
+    window.__isAnalysisCompleted = false;
+    var m = window.cbomModel || window.model;
+    if (m) {
+      m.showResults = false;
+      if (m.scanning) {
+        m.scanning.isScanning = false;
+        m.scanning.liveDetections = [];
+        m.scanning.numberOfFiles = null;
+        m.scanning.numberOfLines = null;
+        m.scanning.scanDuration = null;
+        m.scanning.totalDuration = null;
+        m.scanning.scanningStatus = '';
+      }
+      var searchInput = document.querySelector('.search-bar input.bx--search-input');
+      var userText = searchInput ? searchInput.value : '';
+      if (m.codeOrigin) {
+        m.codeOrigin.gitUrl = null;
+        m.codeOrigin.revision = null;
+        m.codeOrigin.commitID = null;
+        m.codeOrigin.subfolder = null;
+        m.codeOrigin.uploadedFileName = null;
+        m.codeOrigin.projectIdentifier = null;
+        if (forceClearInput || !userText) {
+          m.codeOrigin.scanUrl = null;
+        } else {
+          m.codeOrigin.scanUrl = userText;
+        }
+      }
+      m.cbom = null;
+      m.policyCheckResult = null;
+    }
+  }
+
+  async function checkBackendAnalysisType() {
+    try {
+      if (!currentAnalysisId) {
+        var p = new URLSearchParams(window.location.search);
+        currentAnalysisId = p.get('analysisId') || '';
+        var tParam = p.get('targetType');
+        if (tParam) window.__targetType = tParam;
+        var sParam = p.get('sourceType');
+        if (sParam) window.__sourceType = sParam;
+      }
+
+      if (!currentAnalysisId) {
+        resetVueModel();
+        applyModeIfNeeded();
+        return;
+      }
+
+      var detailRes = await fetch('http://localhost:3001/api/analyses/' + encodeURIComponent(currentAnalysisId));
+      if (detailRes.ok) {
+        var detail = await detailRes.json();
+        if (detail.sourceType) window.__sourceType = detail.sourceType;
+        if (detail.targetType) window.__targetType = detail.targetType;
+
+        var m = window.cbomModel || window.model;
+        var curMode = resolveCurrentMode();
+        var appDisplayName = (curMode === 'git' && (window.__lastScannedGitUrl || detail.repositoryUrl)) ? (window.__lastScannedGitUrl || detail.repositoryUrl) : (detail.applicationName || detail.repositoryUrl || 'project');
+
+        if (detail.status === 'RUNNING') {
+          enterScanningState(appDisplayName);
+          startLivePolling();
+        } else if (detail.status === 'CREATED' || detail.status === 'WAITING_FOR_INPUT') {
+          // Ready for user input or scan start
+          isScanning = false;
+          window.__isScanningActive = false;
+          window.__isAnalysisCompleted = false;
+          if (livePollTimer) {
+            clearInterval(livePollTimer);
+            livePollTimer = null;
+          }
+          resetVueModel();
+          applyModeIfNeeded();
+        } else if (detail.status === 'COMPLETED') {
+          isScanning = false;
+          window.__isScanningActive = false;
+          window.__isAnalysisCompleted = true;
+          if (m && m.scanning) m.scanning.isScanning = false;
+          try {
+            var assetsRes = await fetch('http://localhost:3001/api/analyses/' + encodeURIComponent(currentAnalysisId) + '/assets');
+            if (assetsRes.ok) {
+              var assets = await assetsRes.json();
+              if (assets) setAuthoritativeAssets(assets);
+            }
+          } catch(e) {}
+
+          var existingCbomRes = await fetch('http://localhost:3001/api/analyses/' + encodeURIComponent(currentAnalysisId) + '/cbom').catch(function() { return null; });
+          if (existingCbomRes && existingCbomRes.ok) {
+            var existingCbom = await existingCbomRes.json();
+            if (existingCbom && Array.isArray(existingCbom.components)) {
+              console.log('[CRYPTAVISTA] CBOM loaded: ' + currentAnalysisId);
+              updateLiveVueCbom(existingCbom, appDisplayName, false);
+            } else if (existingCbom) {
+              // CBOM exists but may have been fetched in unexpected format; log and skip gracefully
+              console.warn('[CRYPTAVISTA] CBOM response format unexpected for: ' + currentAnalysisId);
+            }
+          } else if (!existingCbomRes || existingCbomRes.status === 404) {
+            // CBOM record does not exist yet (may have 0 assets) - show result view with empty CBOM
+            console.log('[CRYPTAVISTA] No CBOM record found for completed analysis: ' + currentAnalysisId + ' (0 assets)');
+            var mComp = window.cbomModel || window.model;
+            if (mComp) {
+              mComp.showResults = true;
+              if (mComp.scanning) {
+                mComp.scanning.isScanning = false;
+                mComp.scanning.scanningStatus = 'loaded';
+              }
+              // Set minimal CBOM with metadata so the visualization renders correctly (no assets)
+              if (!mComp.cbom) {
+                mComp.cbom = {
+                  bomFormat: 'CycloneDX',
+                  specVersion: '1.6',
+                  metadata: { component: { name: appDisplayName, type: 'application' } },
+                  components: [],
+                  dependencies: []
+                };
+              }
+            }
+          }
+        }
+      }
+      applyModeIfNeeded();
+    } catch (e) {}
+  }
+
+  function ensureVueInitialized() {
+    var tries = 0;
+    var initInterval = setInterval(function() {
+      tries++;
+      var m = window.cbomModel || window.model;
+      if (m || tries > 100) {
+        clearInterval(initInterval);
+        if (m) {
+          m.useDarkMode = true;
+          if (currentAnalysisId) {
+            console.log('[CRYPTAVISTA] CBOMKit loaded: ' + currentAnalysisId);
+          }
+          checkBackendAnalysisType();
+        }
+      }
+    }, 50);
+  }
+  ensureVueInitialized();
+
+  window.addEventListener('message', function(e) {
+    if (!e.data) return;
+    if (e.data.type === 'UPDATE_ASSETS') {
+      if (e.data.assets && e.data.assets.length > 0) {
+        setAuthoritativeAssets(e.data.assets);
+      }
+      return;
+    }
+    if (e.data.type === 'LOAD_ANALYSIS') {
+      if (e.data.assets && e.data.assets.length > 0) {
+        setAuthoritativeAssets(e.data.assets);
+      }
+      if (e.data.analysisId) {
+        var isSameAnalysis = (e.data.analysisId === currentAnalysisId);
+        if (!isSameAnalysis) {
+          lastRenderedCbomSignature = '';
+          currentAnalysisId = e.data.analysisId;
+          resetVueModel();
+          console.log('[CRYPTAVISTA] CBOMKit loaded: ' + currentAnalysisId);
+          window.__currentAssets = [];
+          window.__currentAssetsMap = {};
+          if (livePollTimer) {
+            clearInterval(livePollTimer);
+            livePollTimer = null;
+          }
+        }
+      }
+      if (e.data.sourceType) window.__sourceType = e.data.sourceType;
+      if (e.data.targetType) window.__targetType = e.data.targetType;
+      if (e.data.status === 'CREATED' || e.data.status === 'WAITING_FOR_INPUT') {
+        isScanning = false;
+        window.__isScanningActive = false;
+        window.__isAnalysisCompleted = false;
+        if (livePollTimer) {
+          clearInterval(livePollTimer);
+          livePollTimer = null;
+        }
+        resetVueModel();
+      }
+      applyModeIfNeeded();
+      checkBackendAnalysisType();
+    } else if (e.data.type === 'SCAN_STARTED' || e.data.type === 'FOLDER_SCAN_STARTED' || e.data.type === 'BINARY_SCAN_STARTED' || e.data.type === 'CONTAINER_SCAN_STARTED' || e.data.type === 'GIT_SCAN_STARTED') {
+      var appDisplayName = e.data.applicationName || window.__selectedFolderName || window.__selectedBinaryName || 'project';
+      enterScanningState(appDisplayName);
+      applyModeIfNeeded();
+      startLivePolling();
+    }
+  });
+
+  window.__startGitScan = async function(customGitUrl) {
+    if (isScanning) return;
+    var searchInput = document.querySelector('.search-bar input.bx--search-input');
+    var gitUrl = (customGitUrl || (searchInput ? searchInput.value : '')).trim();
+
+    if (!gitUrl) {
+      alert('Please enter a Git repository URL (e.g. https://github.com/example/project) to scan.');
+      return;
+    }
+
+    if (!currentAnalysisId) {
+      try {
+        var aRes = await fetch('http://localhost:3001/api/analyses');
+        var aList = await aRes.json();
+        if (aList && aList.length > 0) {
+          currentAnalysisId = aList[aList.length - 1].analysisId;
+        }
+      } catch (e) {}
+    }
+
+    if (!currentAnalysisId) {
+      alert('Analysis ID not found. Please refresh or select a target application.');
+      return;
+    }
+
+    console.log('[CRYPTAVISTA] CBOMKit input submitted: ' + gitUrl);
+    console.log('[CRYPTAVISTA] CBOM scan started: ' + currentAnalysisId);
+
+    window.__lastScannedGitUrl = gitUrl;
+    isScanning = true;
+    enterScanningState(gitUrl);
+    applyModeIfNeeded();
+
+    try {
+      var formData = new FormData();
+      formData.append('targetType', 'source_code');
+      formData.append('repositoryUrl', gitUrl);
+
+      var res = await fetch('http://localhost:3001/api/analyses/' + encodeURIComponent(currentAnalysisId) + '/scan', {
+        method: 'POST',
+        body: formData
+      });
+
+      if (!res.ok) {
+        var errJson = await res.json().catch(function() { return {}; });
+        throw new Error(errJson.error || errJson.detail || 'Failed to start Git scan');
+      }
+
+      if (window.parent) {
+        window.parent.postMessage({ type: 'SCAN_STARTED', analysisId: currentAnalysisId }, '*');
+        window.parent.postMessage({ type: 'GIT_SCAN_STARTED', analysisId: currentAnalysisId }, '*');
+      }
+
+      startLivePolling();
+    } catch (err) {
+      alert(err.message || 'Git scan error');
+      isScanning = false;
+      applyModeIfNeeded();
+    }
+  };
+
+  window.__startFolderUpload = async function() {
+    if (isScanning) return;
+    if (!window.__selectedFolderFiles || window.__selectedFolderFiles.length === 0) {
+      alert('Please select a local folder to scan first.');
+      return;
+    }
+
+    if (!currentAnalysisId) {
+      try {
+        var aRes = await fetch('http://localhost:3001/api/analyses');
+        var aList = await aRes.json();
+        if (aList && aList.length > 0) {
+          currentAnalysisId = aList[aList.length - 1].analysisId;
+        }
+      } catch (e) {}
+    }
+
+    if (!currentAnalysisId) {
+      alert('Analysis ID not found. Please refresh or select a target application.');
+      return;
+    }
+
+    var files = window.__selectedFolderFiles;
+    var folderName = window.__selectedFolderName || 'project';
+
+    console.log('[CRYPTAVISTA] CBOMKit input submitted: ' + folderName);
+    console.log('[CRYPTAVISTA] CBOM scan started: ' + currentAnalysisId);
+
+    isScanning = true;
+    enterScanningState(folderName);
+    applyModeIfNeeded();
+
+    try {
+      if (!window.JSZip) {
+        throw new Error('JSZip library unavailable');
+      }
+      var zip = new window.JSZip();
+      for (var i = 0; i < files.length; i++) {
+        var file = files[i];
+        var relPath = file.webkitRelativePath || file.name;
+        var sanitized = relPath.replace(/\\/g, '/').replace(/^\/+/, '');
+        zip.file(sanitized, file);
+      }
+      var blob = await zip.generateAsync({ type: 'blob', compression: 'DEFLATE', compressionOptions: { level: 6 } });
+      var formData = new FormData();
+      formData.append('file', blob, folderName + '.zip');
+      formData.append('targetType', 'folder');
+
+      var res = await fetch('http://localhost:3001/api/analyses/' + encodeURIComponent(currentAnalysisId) + '/scan', {
+        method: 'POST',
+        body: formData
+      });
+
+      if (!res.ok) {
+        var errJson = await res.json().catch(function() { return {}; });
+        throw new Error(errJson.error || 'Failed to start folder scan');
+      }
+
+      if (window.parent) {
+        window.parent.postMessage({ type: 'SCAN_STARTED', analysisId: currentAnalysisId }, '*');
+        window.parent.postMessage({ type: 'FOLDER_SCAN_STARTED', analysisId: currentAnalysisId }, '*');
+      }
+
+      startLivePolling();
+    } catch (err) {
+      alert(err.message || 'Folder scan error');
+      isScanning = false;
+      applyModeIfNeeded();
+    }
+  };
+
+  window.__startBinaryUpload = async function() {
+    if (isScanning) return;
+    if (!window.__selectedBinaryFile) {
+      alert('Please select a binary or library file to scan first.');
+      return;
+    }
+
+    if (!currentAnalysisId) {
+      try {
+        var aRes = await fetch('http://localhost:3001/api/analyses');
+        var aList = await aRes.json();
+        if (aList && aList.length > 0) {
+          currentAnalysisId = aList[aList.length - 1].analysisId;
+        }
+      } catch (e) {}
+    }
+
+    if (!currentAnalysisId) {
+      alert('Analysis ID not found. Please refresh or select a target application.');
+      return;
+    }
+
+    var file = window.__selectedBinaryFile;
+
+    console.log('[CRYPTAVISTA] CBOMKit input submitted: ' + file.name);
+    console.log('[CRYPTAVISTA] CBOM scan started: ' + currentAnalysisId);
+
+    isScanning = true;
+    enterScanningState(file.name);
+    applyModeIfNeeded();
+
+    try {
+      var formData = new FormData();
+      formData.append('file', file, file.name);
+      formData.append('targetType', 'binary');
+
+      var res = await fetch('http://localhost:3001/api/analyses/' + encodeURIComponent(currentAnalysisId) + '/scan', {
+        method: 'POST',
+        body: formData
+      });
+
+      if (!res.ok) {
+        var errJson = await res.json().catch(function() { return {}; });
+        throw new Error(errJson.error || 'Failed to start binary scan');
+      }
+
+      if (window.parent) {
+        window.parent.postMessage({ type: 'SCAN_STARTED', analysisId: currentAnalysisId }, '*');
+        window.parent.postMessage({ type: 'BINARY_SCAN_STARTED', analysisId: currentAnalysisId }, '*');
+      }
+
+      startLivePolling();
+    } catch (err) {
+      alert(err.message || 'Binary scan error');
+      isScanning = false;
+      applyModeIfNeeded();
+    }
+  };
+
+  window.__startContainerScan = async function(customImage) {
+    if (isScanning) return;
+    var searchInput = document.querySelector('.search-bar input.bx--search-input');
+    var rawInput = (customImage || (searchInput ? (searchInput.dataset.realImage || searchInput.value) : '')).trim();
+    var matchParen = rawInput.match(/\(([^)]+)\)/);
+    var imageReference = matchParen ? matchParen[1].trim() : rawInput;
+
+    if (!imageReference) {
+      alert('Please enter a container image reference (e.g. nginx:latest, ubuntu:latest) to scan.');
+      return;
+    }
+
+    if (!currentAnalysisId) {
+      try {
+        var aRes = await fetch('http://localhost:3001/api/analyses');
+        var aList = await aRes.json();
+        if (aList && aList.length > 0) {
+          currentAnalysisId = aList[aList.length - 1].analysisId;
+        }
+      } catch (e) {}
+    }
+
+    if (!currentAnalysisId) {
+      alert('Analysis ID not found. Please refresh or select a target application.');
+      return;
+    }
+
+    console.log('[CRYPTAVISTA] CBOMKit input submitted: ' + imageReference);
+    console.log('[CRYPTAVISTA] CBOM scan started: ' + currentAnalysisId);
+
+    isScanning = true;
+    enterScanningState(imageReference);
+    applyModeIfNeeded();
+
+    try {
+      var formData = new FormData();
+      formData.append('targetType', 'container');
+      formData.append('imageReference', imageReference);
+      formData.append('repositoryUrl', imageReference);
+
+      var res = await fetch('http://localhost:3001/api/analyses/' + encodeURIComponent(currentAnalysisId) + '/scan', {
+        method: 'POST',
+        body: formData
+      });
+
+      if (!res.ok) {
+        var errJson = await res.json().catch(function() { return {}; });
+        throw new Error(errJson.error || errJson.detail || 'Failed to start container image scan');
+      }
+
+      if (window.parent) {
+        window.parent.postMessage({ type: 'SCAN_STARTED', analysisId: currentAnalysisId }, '*');
+        window.parent.postMessage({ type: 'CONTAINER_SCAN_STARTED', analysisId: currentAnalysisId }, '*');
+      }
+
+      startLivePolling();
+    } catch (err) {
+      alert(err.message || 'Container scan error');
+      isScanning = false;
+      applyModeIfNeeded();
+    }
+  };
+
+  function suppressLimitedComplianceToast() {
+    var m = window.cbomModel || window.model;
+    if (m) {
+      if (!m.__complianceAlertSuppressed) {
+        m.__complianceAlertSuppressed = true;
+        var origAddError = m.addError ? m.addError.bind(m) : null;
+        if (origAddError) {
+          m.addError = function(status, msg) {
+            var st = (status || '').toString();
+            if (st.indexOf('FallBackLocalComplianceReport') !== -1 || st.indexOf('InvalidCbom') !== -1) {
+              return;
+            }
+            return origAddError(status, msg);
+          };
+        }
+      }
+      if (Array.isArray(m.errors)) {
+        for (var i = m.errors.length - 1; i >= 0; i--) {
+          var errSt = m.errors[i] ? (m.errors[i].status || '').toString() : '';
+          var errMsg = m.errors[i] ? (m.errors[i].message || '').toString() : '';
+          if (errSt.indexOf('FallBackLocalComplianceReport') !== -1 || errSt.indexOf('InvalidCbom') !== -1 ||
+              errMsg.indexOf('Invalid CBOM') !== -1 || errMsg.indexOf('expected format') !== -1) {
+            m.errors.splice(i, 1);
+          }
+        }
+      }
+    }
+
+    var toasts = document.querySelectorAll('.bx--toast-notification, .cds--toast-notification');
+    for (var j = 0; j < toasts.length; j++) {
+      var t = toasts[j];
+      var txt = t.textContent || '';
+      var titleAttr = t.getAttribute('title') || '';
+      if (txt.indexOf('Limited compliance') !== -1 || txt.indexOf('remote compliance service') !== -1 || titleAttr.indexOf('Limited compliance') !== -1 ||
+          txt.indexOf('Invalid CBOM') !== -1 || txt.indexOf('expected format') !== -1 || titleAttr.indexOf('Invalid CBOM') !== -1) {
+        t.style.display = 'none';
+        var parent = t.closest ? t.closest('.notificationContainer') : t.parentNode;
+        if (parent && parent.classList && parent.classList.contains('notificationContainer')) {
+          parent.style.display = 'none';
+        }
+      }
+    }
+
+    var inlineNotifs = document.querySelectorAll('.bx--inline-notification, .cds--inline-notification');
+    for (var k = 0; k < inlineNotifs.length; k++) {
+      var inNotif = inlineNotifs[k];
+      var inTxt = inNotif.textContent || '';
+      if (inTxt.indexOf('compliant') !== -1 || inTxt.indexOf('policy') !== -1 || inTxt.indexOf('Compliance') !== -1 || inTxt.indexOf('quantum_safe') !== -1 || inTxt.indexOf('Analyzing compliance') !== -1) {
+        inNotif.style.display = 'none';
+        inNotif.style.height = '0';
+        inNotif.style.margin = '0';
+        inNotif.style.padding = '0';
+        var p = inNotif.parentElement;
+        if (p && p.style && p.style.paddingTop === '12px') {
+          p.style.display = 'none';
+        }
+      }
+    }
+
+    var skel = document.querySelectorAll('.skeleton-bordered');
+    for (var s = 0; s < skel.length; s++) {
+      if (skel[s].textContent && skel[s].textContent.indexOf('Analyzing compliance') !== -1) {
+        skel[s].style.display = 'none';
+      }
+    }
+  }
+
+  setInterval(suppressLimitedComplianceToast, 100);
+
+  function getOrCreateFolderDropzone(parent, insertAfterEl) {
+    var existing = document.getElementById('cbom-custom-folder-dropzone');
+    if (existing) return existing;
+
+    var container = document.createElement('div');
+    container.id = 'cbom-custom-folder-dropzone';
+    container.className = 'custom-dropzone-wrapper';
+
+    container.innerHTML = 
+      '<div class="custom-dropzone-box" id="folder-drop-target">' +
+        '<input type="file" id="folder-native-file-input" webkitdirectory directory multiple>' +
+        '<div class="custom-dropzone-header">' +
+          folderSvg +
+          '<span class="custom-dropzone-title-text">Drop project folder here</span>' +
+        '</div>' +
+        '<div class="custom-dropzone-subheader">(or click to browse)</div>' +
+      '</div>' +
+      '<div class="custom-selected-info-row" id="folder-selected-row" style="display: none;">' +
+        '<span class="custom-selected-name" id="folder-selected-text"></span>' +
+        '<span style="font-size: 11px; opacity: 0.8;">Ready to scan</span>' +
+      '</div>' +
+      '<div class="custom-scan-button-row">' +
+        '<button type="button" class="custom-scan-btn" id="folder-scan-submit-btn" disabled>' +
+          '<span>Scan</span>' +
+          arrowRightSvg +
+        '</button>' +
+      '</div>';
+
+    var fileInput = container.querySelector('#folder-native-file-input');
+    var dropBox = container.querySelector('#folder-drop-target');
+    var submitBtn = container.querySelector('#folder-scan-submit-btn');
+
+    fileInput.addEventListener('change', function(e) {
+      var files = Array.from(e.target.files || []);
+      if (files.length === 0) return;
+      window.__selectedFolderFiles = files;
+      var firstRel = files[0].webkitRelativePath || files[0].name;
+      var folderName = firstRel.split(/[/\\]/)[0] || 'Selected Folder';
+      window.__selectedFolderName = folderName;
+      window.__hasFolderSelected = true;
+      updateFolderDropzoneState(container);
+    });
+
+    dropBox.addEventListener('dragover', function(e) {
+      e.preventDefault();
+      dropBox.classList.add('drag-over');
+    });
+    dropBox.addEventListener('dragleave', function() {
+      dropBox.classList.remove('drag-over');
+    });
+    dropBox.addEventListener('drop', function(e) {
+      e.preventDefault();
+      dropBox.classList.remove('drag-over');
+      if (e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+        var files = Array.from(e.dataTransfer.files);
+        window.__selectedFolderFiles = files;
+        var firstRel = files[0].webkitRelativePath || files[0].name;
+        var folderName = firstRel.split(/[/\\]/)[0] || 'Selected Folder';
+        window.__selectedFolderName = folderName;
+        window.__hasFolderSelected = true;
+        updateFolderDropzoneState(container);
+      }
+    });
+
+    submitBtn.addEventListener('click', function(e) {
+      e.preventDefault();
+      if (window.__hasFolderSelected && !isScanning) {
+        window.__startFolderUpload();
+      }
+    });
+
+    if (insertAfterEl && insertAfterEl.nextSibling) {
+      parent.insertBefore(container, insertAfterEl.nextSibling);
+    } else {
+      parent.appendChild(container);
+    }
+    return container;
+  }
+
+  function updateFolderDropzoneState(container) {
+    if (!container) return;
+    var row = container.querySelector('#folder-selected-row');
+    var text = container.querySelector('#folder-selected-text');
+    var btn = container.querySelector('#folder-scan-submit-btn');
+    var titleText = container.querySelector('.custom-dropzone-title-text');
+
+    if (isScanning) {
+      if (btn) {
+        btn.disabled = true;
+        btn.querySelector('span').textContent = 'Scanning...';
+      }
+      return;
+    }
+
+    if (window.__hasFolderSelected && window.__selectedFolderName) {
+      var count = window.__selectedFolderFiles ? window.__selectedFolderFiles.length : 0;
+      if (row) row.style.display = 'flex';
+      if (text) text.textContent = '≡ƒôü ' + window.__selectedFolderName + ' (' + count + ' files selected)';
+      if (titleText) titleText.textContent = window.__selectedFolderName + ' (' + count + ' files)';
+      if (btn) {
+        btn.disabled = false;
+        btn.querySelector('span').textContent = 'Scan';
+      }
+    } else {
+      if (row) row.style.display = 'none';
+      if (titleText) titleText.textContent = 'Drop project folder here';
+      if (btn) {
+        btn.disabled = true;
+        btn.querySelector('span').textContent = 'Scan';
+      }
+    }
+  }
+
+  function getOrCreateBinaryDropzone(parent, insertAfterEl) {
+    var existing = document.getElementById('cbom-custom-binary-dropzone');
+    if (existing) return existing;
+
+    var container = document.createElement('div');
+    container.id = 'cbom-custom-binary-dropzone';
+    container.className = 'custom-dropzone-wrapper';
+
+    container.innerHTML = 
+      '<div class="custom-dropzone-box" id="binary-drop-target">' +
+        '<input type="file" id="binary-native-file-input" accept=".exe,.dll,.so,.bin,.a">' +
+        '<div class="custom-dropzone-header">' +
+          binarySvg +
+          '<span class="custom-dropzone-binary-title-text">Drop binary / library here</span>' +
+        '</div>' +
+        '<div class="custom-dropzone-subheader">(or click to browse)</div>' +
+      '</div>' +
+      '<div class="custom-selected-info-row" id="binary-selected-row" style="display: none;">' +
+        '<span class="custom-selected-name" id="binary-selected-text"></span>' +
+        '<span style="font-size: 11px; opacity: 0.8;">Ready to scan</span>' +
+      '</div>' +
+      '<div class="custom-scan-button-row">' +
+        '<button type="button" class="custom-scan-btn" id="binary-scan-submit-btn" disabled>' +
+          '<span>Scan</span>' +
+          arrowRightSvg +
+        '</button>' +
+      '</div>';
+
+    var fileInput = container.querySelector('#binary-native-file-input');
+    var dropBox = container.querySelector('#binary-drop-target');
+    var submitBtn = container.querySelector('#binary-scan-submit-btn');
+
+    fileInput.addEventListener('change', function(e) {
+      var files = Array.from(e.target.files || []);
+      if (files.length === 0) return;
+      var file = files[0];
+      window.__selectedBinaryFile = file;
+      window.__selectedBinaryName = file.name;
+      window.__hasBinarySelected = true;
+      updateBinaryDropzoneState(container);
+    });
+
+    dropBox.addEventListener('dragover', function(e) {
+      e.preventDefault();
+      dropBox.classList.add('drag-over');
+    });
+    dropBox.addEventListener('dragleave', function() {
+      dropBox.classList.remove('drag-over');
+    });
+    dropBox.addEventListener('drop', function(e) {
+      e.preventDefault();
+      dropBox.classList.remove('drag-over');
+      if (e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+        var file = e.dataTransfer.files[0];
+        window.__selectedBinaryFile = file;
+        window.__selectedBinaryName = file.name;
+        window.__hasBinarySelected = true;
+        updateBinaryDropzoneState(container);
+      }
+    });
+
+    submitBtn.addEventListener('click', function(e) {
+      e.preventDefault();
+      if (window.__hasBinarySelected && !isScanning) {
+        window.__startBinaryUpload();
+      }
+    });
+
+    if (insertAfterEl && insertAfterEl.nextSibling) {
+      parent.insertBefore(container, insertAfterEl.nextSibling);
+    } else {
+      parent.appendChild(container);
+    }
+    return container;
+  }
+
+  function updateBinaryDropzoneState(container) {
+    if (!container) return;
+    var row = container.querySelector('#binary-selected-row');
+    var text = container.querySelector('#binary-selected-text');
+    var btn = container.querySelector('#binary-scan-submit-btn');
+    var titleText = container.querySelector('.custom-dropzone-binary-title-text');
+
+    if (isScanning) {
+      if (btn) {
+        btn.disabled = true;
+        btn.querySelector('span').textContent = 'Scanning...';
+      }
+      return;
+    }
+
+    if (window.__hasBinarySelected && window.__selectedBinaryFile) {
+      var sizeStr = formatFileSize(window.__selectedBinaryFile.size);
+      if (row) row.style.display = 'flex';
+      if (text) text.textContent = '≡ƒôª ' + window.__selectedBinaryName + ' (' + sizeStr + ')';
+      if (titleText) titleText.textContent = window.__selectedBinaryName + ' (' + sizeStr + ')';
+      if (btn) {
+        btn.disabled = false;
+        btn.querySelector('span').textContent = 'Scan';
+      }
+    } else {
+      if (row) row.style.display = 'none';
+      if (titleText) titleText.textContent = 'Drop binary / library here';
+      if (btn) {
+        btn.disabled = true;
+        btn.querySelector('span').textContent = 'Scan';
+      }
+    }
+  }
+
+  function setupContainerInput() {
+    var searchInput = document.querySelector('.search-bar input.bx--search-input');
+    if (!searchInput) return;
+
+    var expectedPlaceholder = 'Enter container image reference (e.g. nginx:latest, ubuntu:latest)';
+    if (searchInput.placeholder !== expectedPlaceholder && !searchInput.value) {
+      searchInput.placeholder = expectedPlaceholder;
+    }
+
+    var scanButtons = document.querySelectorAll('.search-button, button.search-button, .search button');
+    scanButtons.forEach(function(btn) {
+      if (isScanning) {
+        btn.disabled = true;
+        btn.setAttribute('disabled', 'disabled');
+        btn.classList.add('bx--btn--disabled');
+        btn.textContent = 'Scanning...';
+      } else {
+        var hasText = searchInput.value && searchInput.value.trim().length > 0;
+        btn.disabled = !hasText;
+        if (hasText) {
+          btn.removeAttribute('disabled');
+          btn.removeAttribute('aria-disabled');
+          btn.classList.remove('bx--btn--disabled', 'cds--btn--disabled');
+          btn.classList.add('folder-enabled');
+          btn.style.pointerEvents = 'auto';
+          btn.style.opacity = '1';
+          btn.style.cursor = 'pointer';
+        } else {
+          btn.setAttribute('disabled', 'disabled');
+          btn.classList.remove('folder-enabled');
+        }
+      }
+
+      if (!btn.__containerBound) {
+        btn.__containerBound = true;
+        btn.addEventListener('click', function(e) {
+          if (resolveCurrentMode() === 'container') {
+            e.preventDefault();
+            e.stopPropagation();
+            e.stopImmediatePropagation();
+            var val = searchInput ? searchInput.value.trim() : '';
+            if (val) window.__startContainerScan(val);
+          }
+        }, true);
+      }
+    });
+
+    if (!searchInput.__containerKeyBound) {
+      searchInput.__containerKeyBound = true;
+      var syncContainerInput = function() {
+        var m = window.cbomModel || window.model;
+        if (m && m.codeOrigin) {
+          m.codeOrigin.scanUrl = searchInput.value;
+        }
+        if (resolveCurrentMode() === 'container') {
+          setupContainerInput();
+        }
+      };
+      searchInput.addEventListener('input', syncContainerInput);
+      searchInput.addEventListener('change', syncContainerInput);
+      searchInput.addEventListener('keydown', function(e) {
+        if (resolveCurrentMode() === 'container' && e.key === 'Enter') {
+          e.preventDefault();
+          e.stopPropagation();
+          e.stopImmediatePropagation();
+          var val = searchInput.value.trim();
+          if (val) window.__startContainerScan(val);
+        }
+      }, true);
+    }
+  }
+
+  function replaceSearchIconWithContainer() {
+    var searchBars = document.querySelectorAll('.search-bar');
+    searchBars.forEach(function(bar) {
+      var magWrapper = bar.querySelector('.bx--search-magnifier:not(svg), .cds--search-magnifier:not(svg)');
+      if (magWrapper) {
+        var existingSvg = magWrapper.querySelector('svg');
+        if (!existingSvg || existingSvg.getAttribute('data-icon-type') !== 'container') {
+          magWrapper.innerHTML = '<svg focusable="false" preserveAspectRatio="xMidYMid meet" xmlns="http://www.w3.org/2000/svg" fill="currentColor" aria-hidden="true" class="bx--search-magnifier-icon" data-icon-type="container" width="16" height="16" viewBox="0 0 32 32"><path d="M28 6H4a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h24a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2zM4 8h24v3H4zm0 5h24v4H4zm0 6h24v5H4z"></path></svg>';
+        }
+      } else {
+        var directSvg = bar.querySelector('svg.bx--search-magnifier, svg.cds--search-magnifier, svg.bx--search-magnifier-icon, svg.cds--search-magnifier-icon');
+        if (directSvg && directSvg.getAttribute('data-icon-type') !== 'container') {
+          directSvg.setAttribute('data-icon-type', 'container');
+          directSvg.setAttribute('viewBox', '0 0 32 32');
+          directSvg.innerHTML = '<path d="M28 6H4a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h24a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2zM4 8h24v3H4zm0 5h24v4H4zm0 6h24v5H4z"></path>';
+        }
+      }
+    });
+  }
+
+  function restoreSearchIcon() {
+    var searchBars = document.querySelectorAll('.search-bar');
+    searchBars.forEach(function(bar) {
+      var magWrapper = bar.querySelector('.bx--search-magnifier:not(svg), .cds--search-magnifier:not(svg)');
+      if (magWrapper) {
+        var existingSvg = magWrapper.querySelector('svg');
+        if (existingSvg && (existingSvg.getAttribute('data-icon-type') === 'container')) {
+          magWrapper.innerHTML = '<svg focusable="false" preserveAspectRatio="xMidYMid meet" xmlns="http://www.w3.org/2000/svg" fill="currentColor" aria-hidden="true" class="bx--search-magnifier-icon" width="16" height="16" viewBox="0 0 16 16"><path d="M15,14.3L10.7,10c1.9-2.3,1.6-5.8-0.7-7.7S4.2,0.7,2.3,3S0.7,8.8,3,10.7c2,1.7,5,1.7,7,0l4.3,4.3L15,14.3z M2,6.5 C2,4,4,2,6.5,2S11,4,11,6.5S9,11,6.5,11S2,9,2,6.5z"></path></svg>';
+        }
+      } else {
+        var directSvg = bar.querySelector('svg.bx--search-magnifier, svg.cds--search-magnifier, svg.bx--search-magnifier-icon, svg.cds--search-magnifier-icon');
+        if (directSvg && (directSvg.getAttribute('data-icon-type') === 'container')) {
+          directSvg.removeAttribute('data-icon-type');
+          directSvg.setAttribute('viewBox', '0 0 16 16');
+          directSvg.innerHTML = '<path d="M15,14.3L10.7,10c1.9-2.3,1.6-5.8-0.7-7.7S4.2,0.7,2.3,3S0.7,8.8,3,10.7c2,1.7,5,1.7,7,0l4.3,4.3L15,14.3z M2,6.5 C2,4,4,2,6.5,2S11,4,11,6.5S9,11,6.5,11S2,9,2,6.5z"></path>';
+        }
+      }
+    });
+  }
+
+  function setupGitInput() {
+    var searchInput = document.querySelector('.search-bar input.bx--search-input');
+    if (!searchInput) return;
+
+    var expectedPlaceholder = 'Enter Git URL or Package URL to scan (e.g. https://github.com/example/project)';
+    if (searchInput.placeholder !== expectedPlaceholder && !searchInput.value) {
+      searchInput.placeholder = expectedPlaceholder;
+    }
+
+    var scanButtons = document.querySelectorAll('.search-button, button.search-button, .search button');
+    scanButtons.forEach(function(btn) {
+      var m = window.cbomModel || window.model;
+      var curVal = (searchInput && searchInput.value) || (m && m.codeOrigin && m.codeOrigin.scanUrl) || '';
+      var hasText = curVal.trim().length > 0;
+
+      if (isScanning) {
+        btn.disabled = true;
+        btn.setAttribute('disabled', 'disabled');
+        btn.classList.add('bx--btn--disabled');
+        btn.textContent = 'Scanning...';
+      } else {
+        btn.disabled = !hasText;
+        if (hasText) {
+          btn.removeAttribute('disabled');
+          btn.removeAttribute('aria-disabled');
+          btn.classList.remove('bx--btn--disabled', 'cds--btn--disabled');
+          btn.classList.add('folder-enabled');
+          btn.style.pointerEvents = 'auto';
+          btn.style.opacity = '1';
+          btn.style.cursor = 'pointer';
+        } else {
+          btn.setAttribute('disabled', 'disabled');
+          btn.classList.remove('folder-enabled');
+        }
+      }
+
+      if (!btn.__gitBound) {
+        btn.__gitBound = true;
+        btn.addEventListener('click', function(e) {
+          if (resolveCurrentMode() === 'git') {
+            e.preventDefault();
+            e.stopPropagation();
+            e.stopImmediatePropagation();
+            var m = window.cbomModel || window.model;
+            var val = (searchInput ? searchInput.value : '') || (m && m.codeOrigin && m.codeOrigin.scanUrl) || '';
+            if (val && val.trim().length > 0) {
+              window.__startGitScan(val.trim());
+            }
+          }
+        }, true);
+      }
+    });
+
+    if (!searchInput.__gitKeyBound) {
+      searchInput.__gitKeyBound = true;
+      var syncGitInput = function() {
+        var m = window.cbomModel || window.model;
+        if (m && m.codeOrigin) {
+          m.codeOrigin.scanUrl = searchInput.value;
+        }
+        setupGitInput();
+      };
+      searchInput.addEventListener('input', syncGitInput);
+      searchInput.addEventListener('change', syncGitInput);
+      searchInput.addEventListener('keydown', function(e) {
+        if (resolveCurrentMode() === 'git' && e.key === 'Enter') {
+          e.preventDefault();
+          e.stopPropagation();
+          e.stopImmediatePropagation();
+          var m = window.cbomModel || window.model;
+          var val = (searchInput ? searchInput.value : '') || (m && m.codeOrigin && m.codeOrigin.scanUrl) || '';
+          if (val && val.trim().length > 0) {
+            window.__startGitScan(val.trim());
+          }
+        }
+      }, true);
+    }
+  }
+
+  function applyModeIfNeeded() {
+    suppressLimitedComplianceToast();
+    updateBrandTitle();
+    updateScanningSubtitle();
+
+    var cardContainers = document.querySelectorAll('.card-container');
+    if (!cardContainers || cardContainers.length === 0) return;
+
+    var leftCard = cardContainers[0];
+    var rightCard = cardContainers.length > 1 ? cardContainers[1] : null;
+
+    var mode = resolveCurrentMode();
+
+    if (rightCard) {
+      var rightTitle = rightCard.querySelector('.icon-and-title-container .title');
+      if (rightTitle && rightTitle.textContent.trim() !== 'Upload a CBOM') {
+        rightTitle.textContent = 'Upload a CBOM';
+      }
+      var rightSub = rightCard.querySelector('.body-text');
+      if (rightSub && rightSub.textContent.trim() !== 'Upload an existing CBOM to visualize it.') {
+        rightSub.textContent = 'Upload an existing CBOM to visualize it.';
+      }
+    }
+
+    var leftTitle = leftCard.querySelector('.icon-and-title-container .title');
+    var leftIconContainer = leftCard.querySelector('.icon-and-title-container');
+    var leftSubtitle = leftCard.querySelector('.body-text');
+    var leftSearch = leftCard.querySelector('.search');
+    var leftFilter = leftCard.querySelector('.filter-checkbox') || (leftSearch && leftSearch.nextElementSibling);
+
+    var existingFolderZone = document.getElementById('cbom-custom-folder-dropzone');
+    var existingBinaryZone = document.getElementById('cbom-custom-binary-dropzone');
+
+    function setLeftIcon(svgHtml) {
+      if (!leftIconContainer) return;
+      var curSvg = leftIconContainer.querySelector('svg');
+      if (curSvg) {
+        var temp = document.createElement('div');
+        temp.innerHTML = svgHtml;
+        var newSvg = temp.firstElementChild;
+        if (newSvg && curSvg.outerHTML !== newSvg.outerHTML) {
+          leftIconContainer.replaceChild(newSvg, curSvg);
+        }
+      }
+    }
+
+    if (mode === 'folder') {
+      document.body.classList.remove('binary-mode-active', 'container-mode-active');
+      document.body.classList.add('folder-mode-active');
+
+      if (leftTitle && leftTitle.textContent.trim() !== 'Upload Project Folder') {
+        leftTitle.textContent = 'Upload Project Folder';
+      }
+      setLeftIcon(folderSvg);
+      if (leftSubtitle && leftSubtitle.textContent.trim() !== 'Upload a project folder to scan and generate a CBOM.') {
+        leftSubtitle.textContent = 'Upload a project folder to scan and generate a CBOM.';
+      }
+
+      if (leftSearch) leftSearch.style.setProperty('display', 'none', 'important');
+      if (leftFilter) leftFilter.style.setProperty('display', 'none', 'important');
+      if (existingBinaryZone) existingBinaryZone.style.display = 'none';
+
+      var folderZone = getOrCreateFolderDropzone(leftCard, leftSubtitle);
+      folderZone.style.display = 'block';
+      updateFolderDropzoneState(folderZone);
+
+    } else if (mode === 'binary') {
+      document.body.classList.remove('folder-mode-active', 'container-mode-active');
+      document.body.classList.add('binary-mode-active');
+
+      if (leftTitle && leftTitle.textContent.trim() !== 'Upload Binary / Library') {
+        leftTitle.textContent = 'Upload Binary / Library';
+      }
+      setLeftIcon(binarySvg);
+      if (leftSubtitle && leftSubtitle.textContent.trim() !== 'Upload a binary or cryptographic library to scan and generate a CBOM.') {
+        leftSubtitle.textContent = 'Upload a binary or cryptographic library to scan and generate a CBOM.';
+      }
+
+      if (leftSearch) leftSearch.style.setProperty('display', 'none', 'important');
+      if (leftFilter) leftFilter.style.setProperty('display', 'none', 'important');
+      if (existingFolderZone) existingFolderZone.style.display = 'none';
+
+      var binaryZone = getOrCreateBinaryDropzone(leftCard, leftSubtitle);
+      binaryZone.style.display = 'block';
+      updateBinaryDropzoneState(binaryZone);
+
+    } else if (mode === 'container') {
+      document.body.classList.remove('folder-mode-active', 'binary-mode-active');
+      document.body.classList.add('container-mode-active');
+
+      if (leftTitle && leftTitle.textContent.trim() !== 'Generate a new CBOM') {
+        leftTitle.textContent = 'Generate a new CBOM';
+      }
+      setLeftIcon(addAltSvg);
+      if (leftSubtitle && leftSubtitle.textContent.trim() !== 'Enter a container image reference to scan and generate a CBOM.') {
+        leftSubtitle.textContent = 'Enter a container image reference to scan and generate a CBOM.';
+      }
+
+      if (existingFolderZone) existingFolderZone.style.display = 'none';
+      if (existingBinaryZone) existingBinaryZone.style.display = 'none';
+
+      if (leftSearch) leftSearch.style.removeProperty('display');
+      if (leftFilter) leftFilter.style.removeProperty('display');
+
+      setupContainerInput();
+      replaceSearchIconWithContainer();
+
+    } else {
+      // Git mode
+      document.body.classList.remove('folder-mode-active', 'binary-mode-active', 'container-mode-active');
+
+      if (leftTitle && leftTitle.textContent.trim() !== 'Generate a new CBOM') {
+        leftTitle.textContent = 'Generate a new CBOM';
+      }
+      setLeftIcon(addAltSvg);
+      if (leftSubtitle && leftSubtitle.textContent.trim() !== 'Submit a public Git repository to scan and generate a CBOM.') {
+        leftSubtitle.textContent = 'Submit a public Git repository to scan and generate a CBOM.';
+      }
+
+      if (existingFolderZone) existingFolderZone.style.display = 'none';
+      if (existingBinaryZone) existingBinaryZone.style.display = 'none';
+
+      if (leftSearch) leftSearch.style.removeProperty('display');
+      if (leftFilter) leftFilter.style.removeProperty('display');
+
+      setupGitInput();
+      restoreSearchIcon();
+    }
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', applyModeIfNeeded);
+  } else {
+    applyModeIfNeeded();
+  }
+
+  setInterval(applyModeIfNeeded, 200);
+})();
+</script>
+</body></html>

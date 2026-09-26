@@ -55,9 +55,13 @@ router.post('/', upload.single('file'), async (req: Request, res: Response): Pro
 
     await analysis.save();
 
-    // For folder / binary / container: wait until archive / binary / container reference is scanned in CBOMKit.
-    // For source_code / Git: start processAnalysis so it waits for CBOMKit scan result when user scans in CBOMKit.
-    if ((resolvedTargetType === 'source_code' && !req.file?.path) || (resolvedTargetType === 'container' && repositoryUrl) || (resolvedTargetType === 'folder' && req.file?.path) || (resolvedTargetType === 'binary' && req.file?.path)) {
+    console.log(`[CRYPTAVISTA] analysis created: ${analysisId}`);
+    console.log(`[CRYPTAVISTA] input type: ${resolvedTargetType}`);
+
+    // If an archive/file or explicit repository URL was uploaded directly on creation, process it.
+    // Otherwise, the analysis remains in CREATED status waiting for the user to provide input in CBOMKit.
+    if (req.file?.path || (resolvedTargetType === 'source_code' && repositoryUrl && repositoryUrl.trim().length > 0) || (resolvedTargetType === 'container' && repositoryUrl && repositoryUrl.trim().length > 0)) {
+      console.log(`[CRYPTAVISTA] CBOM scan started: ${analysisId}`);
       processAnalysis(analysisId, repositoryUrl, req.file?.path, resolvedTargetType, branch, commit, req.file?.originalname);
     }
 
@@ -109,6 +113,8 @@ router.post('/:id/scan', upload.single('file'), async (req: Request, res: Respon
     await Analysis.updateOne({ analysisId }, { $set: updateDoc });
 
     const effectiveRepoUrl = effectiveImageRef || analysis.repositoryUrl;
+    console.log(`[CRYPTAVISTA] CBOMKit input submitted: ${effectiveRepoUrl || uploadedFilePath || resolvedTargetType}`);
+    console.log(`[CRYPTAVISTA] CBOM scan started: ${analysisId}`);
     processAnalysis(analysisId, effectiveRepoUrl, uploadedFilePath, resolvedTargetType, branch, commit, originalFilename);
 
     res.json({ success: true, status: 'RUNNING', analysisId });
@@ -180,9 +186,33 @@ router.get('/:id', async (req: Request, res: Response): Promise<void> => {
 router.get('/:id/cbom', async (req: Request, res: Response): Promise<void> => {
   const cbom = await Cbom.findOne({ analysisId: req.params.id });
   if (!cbom) {
+    const analysis = await Analysis.findOne({ analysisId: req.params.id });
+    if (analysis && (analysis.status === 'RUNNING' || analysis.status === 'COMPLETED')) {
+      const initialCbom = {
+        bomFormat: "CycloneDX",
+        specVersion: "1.6",
+        serialNumber: `urn:uuid:${uuidv4()}`,
+        version: 1,
+        metadata: {
+          timestamp: new Date().toISOString(),
+          tools: {
+            services: [{ name: "CRYPTAVISTA Scanner", provider: { name: "CRYPTAVISTA" } }]
+          },
+          component: {
+            name: analysis.applicationName || "project",
+            type: "application"
+          }
+        },
+        components: [],
+        dependencies: []
+      };
+      res.json(initialCbom);
+      return;
+    }
     res.status(404).json({ error: 'CBOM not found' });
     return;
   }
+  console.log(`[CRYPTAVISTA] CBOM loaded: ${req.params.id}`);
   // Ensure synced to CBOMKit backend (port 8081) for visualization
   axios.post(
     `http://localhost:8081/api/v1/cbom/${encodeURIComponent(String(req.params.id))}`,
@@ -1666,7 +1696,7 @@ async function processAnalysis(analysisId: string, repositoryUrl?: string, zipFi
     await updateDiscoverStage('RUNNING');
 
     // Initialize initial empty CBOM in MongoDB so GET /api/analyses/:id/cbom is immediately available during RUNNING
-    if (targetType === 'folder' || targetType === 'binary' || targetType === 'container') {
+    if (targetType === 'folder' || targetType === 'binary' || targetType === 'container' || targetType === 'source_code') {
       const existingCbom = await Cbom.findOne({ analysisId });
       if (!existingCbom) {
         const initialCbom = {
@@ -1858,73 +1888,56 @@ async function processAnalysis(analysisId: string, repositoryUrl?: string, zipFi
       assetCount = await CbomkitAdapter.processOfficialCbom(analysisId, cbomJson, false);
       console.log(`[Discovery: ${analysisId}] Processed and stored ${assetCount} cryptographic asset occurrences for container ${imageReference}`);
     } else {
-      // Existing Source Repository flow: Trigger and Poll CBOMKit (teammate's working implementation)
-      const scanStartTime = Date.now();
-      if (repositoryUrl) {
-        try {
-          console.log(`[Discovery: ${analysisId}] Requesting CBOMKit scan for Git repository: ${repositoryUrl}`);
-          await axios.post(
-            'http://localhost:8081/api/v1/scan',
-            { scanUrl: repositoryUrl },
-            { headers: { 'Content-Type': 'application/json' }, timeout: 10000 }
-          );
-        } catch (scanErr: any) {
-          console.warn(`[Discovery: ${analysisId}] CBOMKit scan dispatch note:`, scanErr.message);
-        }
+      console.log(`[Discovery: ${analysisId}] Processing Git Repository target: "${repositoryUrl}"`);
+      if (!repositoryUrl) {
+        throw new Error('Git repository URL missing from scan request.');
       }
 
-      let cbomFound = false;
-      let foundCbom = null;
-      let retries = 0;
-      const cleanRepo = repositoryUrl ? repositoryUrl.split('/').pop()?.replace(/\.git$/i, '').toLowerCase() : '';
+      // 1. Safely clone repository to scans/<analysisId>
+      const targetDir = await TargetService.prepareGitTarget(analysisId, repositoryUrl);
+      console.log(`[Discovery: ${analysisId}] Safely cloned repository to ${targetDir}`);
 
-      // We poll every 5 seconds for up to 15 minutes (180 retries)
-      while (!cbomFound && retries < 180) {
-        await new Promise(r => setTimeout(r, 5000));
-        retries++;
+      // 2. Discover cryptographic assets using LocalScanner
+      let lastProgressSync = 0;
+      let lastAssetCount = 0;
+      const cbomJson = await LocalScanner.scanDirectory(targetDir, async (partialCbom, info) => {
+        const now = Date.now();
+        if (lastProgressSync === 0 || now - lastProgressSync >= 150 || info.assetCount > lastAssetCount) {
+          lastProgressSync = now;
+          lastAssetCount = info.assetCount;
+          try {
+            await Analysis.updateOne({ analysisId }, {
+              $set: {
+                scannedFiles: info.scannedFiles,
+                scannedLines: info.lines,
+                detectedCryptoAssetCount: info.assetCount,
+                'stages.discover.assetCount': info.assetCount
+              }
+            });
 
-        try {
-          const response = await axios.get('http://localhost:8081/api/v1/cbom/last/10');
-          const cboms = response.data;
-
-          // Find a CBOM that was created AFTER this scan started, matching the target repo if available
-          const recentCbom = cboms.find((c: any) => {
-            const cTime = typeof c.createdAt === 'number' ? c.createdAt : new Date(c.createdAt).getTime();
-            const isAfterScan = !isNaN(cTime) ? cTime >= (scanStartTime - 30000) : true;
-            if (!isAfterScan) return false;
-            if (cleanRepo && c.gitUrl) {
-              return c.gitUrl.toLowerCase().includes(cleanRepo);
-            }
-            return true;
-          });
-
-          if (recentCbom) {
-            cbomFound = true;
-            foundCbom = recentCbom;
+            await CbomkitAdapter.processOfficialCbom(analysisId, partialCbom, true);
+          } catch (progressErr) {
+            console.warn(`[Discovery: ${analysisId}] Progress update note:`, (progressErr as Error).message);
           }
-        } catch (err) {
-          console.error('Error polling CBOMKit API', err);
-        }
-      }
-
-      if (!cbomFound || !foundCbom) {
-        throw new Error('Timeout waiting for CBOMKit to generate a CBOM. Please try again.');
-      }
-
-      assetCount = await CbomkitAdapter.processOfficialCbom(analysisId, foundCbom.bom);
-
-      const linesVal = foundCbom.numberOfLines || foundCbom.scanning?.numberOfLines || 0;
-      const filesVal = foundCbom.numberOfFiles || foundCbom.scanning?.numberOfFiles || (foundCbom.bom?.components?.length ? Math.max(1, Math.round(foundCbom.bom.components.length / 3)) : 0);
-      await Analysis.updateOne({ analysisId }, {
-        $set: {
-          repositoryUrl: foundCbom.gitUrl || foundCbom.scanning?.gitUrl || repositoryUrl,
-          scannedFiles: filesVal,
-          scannedLines: linesVal,
-          gitBranch: branch || foundCbom.branch || foundCbom.scanning?.branch || 'main',
-          gitCommit: commit || foundCbom.commit || foundCbom.scanning?.commit || 'HEAD'
         }
       });
+      console.log(`[Discovery: ${analysisId}] LocalScanner generated CycloneDX CBOM with ${cbomJson.components?.length || 0} components`);
+
+      await Analysis.updateOne({ analysisId }, {
+        $set: {
+          scannedFiles: cbomJson.scannedFiles ?? 0,
+          scannedLines: cbomJson.scannedLines ?? 0,
+          gitBranch: branch || 'main',
+          gitCommit: commit || 'HEAD'
+        }
+      });
+
+      // 3. Process official CBOM (compliance check + quantum risk classification + MongoDB storage)
+      assetCount = await CbomkitAdapter.processOfficialCbom(analysisId, cbomJson, false);
+      console.log(`[Discovery: ${analysisId}] Processed and stored ${assetCount} cryptographic asset occurrences for git repository ${repositoryUrl}`);
     }
+
+    console.log(`[CRYPTAVISTA] CBOM generated: ${analysisId}`);
 
     await updateDiscoverStage('COMPLETED', {
       'stages.discover.assetCount': assetCount,

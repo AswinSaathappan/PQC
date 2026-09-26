@@ -81,11 +81,11 @@ export default {
 
       var title = "";
       if (
-        model.scanning.isScanning &&
+        (model.scanning.isScanning || model.scanning.scanningStatus === "scanning" || (typeof window !== "undefined" && window.__isScanningActive)) &&
         model.scanning.liveDetections.length === 0 &&
         getDetections().length === 0
       ) {
-        title = "Scanning code for cryptographic assets...";
+        title = "Scanning (just a second)...";
       } else if (
         model.scanning.isScanning &&
         model.scanning.liveDetections.length > 0
@@ -99,6 +99,8 @@ export default {
         title = `<span style="color: ${textColor}; font-weight: ${fontWeight};">${
           getDetections().length
         }</span> cryptographic asset found.`;
+      } else if (typeof window !== "undefined" && (window.__isScanningActive || !window.__isAnalysisCompleted)) {
+        title = "Scanning (just a second)...";
       } else {
         title = "No cryptographic asset has been found.";
       }

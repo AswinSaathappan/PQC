@@ -513,7 +513,7 @@ export class CbomkitAdapter {
     console.log(`[CBOMkit] Authoritative inventory stored: ${assetRows.length} detected assets for ${analysisId}`);
     console.log(`[CBOMkit] Summary -> Total: ${cbomSummary.totalCryptoAssets}, Quantum Safe: ${cbomSummary.quantumSafe}, Quantum Vulnerable: ${cbomSummary.quantumVulnerable}, Quantum-Weakened: ${cbomSummary.quantumWeakened}, Unknown: ${cbomSummary.unknown}`);
 
-    // Step 4: Synchronize authoritative CBOM to CBOMKit backend storage for visualization (on final completion)
+    // Step 4: Synchronize authoritative CBOM to CBOMKit backend storage for visualization
     if (!isPartial) {
       try {
         await axios.post(
@@ -525,6 +525,13 @@ export class CbomkitAdapter {
       } catch (syncErr) {
         console.warn(`[CBOMkit] Notice: Could not sync CBOM to CBOMKit backend storage for ${analysisId}:`, (syncErr as Error).message);
       }
+    } else {
+      // Non-blocking sync to CBOMKit backend storage during incremental scan
+      axios.post(
+        `http://localhost:8081/api/v1/cbom/${encodeURIComponent(analysisId)}`,
+        cbomJson,
+        { headers: { 'Content-Type': 'application/json' }, timeout: 1000 }
+      ).catch(() => { });
     }
 
     return assetRows.length;

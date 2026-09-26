@@ -98,7 +98,7 @@ export default function CBOM({
   const [scanError, setScanError] = useState<string | null>(null);
 
   // Embedded CBOMKit visualization service state
-  const [cbomKitOnline, setCbomKitOnline] = useState<boolean | null>(null);
+  const [cbomKitOnline, setCbomKitOnline] = useState<boolean | null>(true);
   const [isCheckingCbomKit, setIsCheckingCbomKit] = useState(false);
 
   const reqIdRef = useRef(0);
@@ -257,7 +257,7 @@ export default function CBOM({
 
   useEffect(() => {
     const handleMsg = (e: MessageEvent) => {
-      if (e.data && (e.data.type === 'SCAN_STARTED' || e.data.type === 'FOLDER_SCAN_STARTED' || e.data.type === 'BINARY_SCAN_STARTED' || e.data.type === 'CONTAINER_SCAN_STARTED')) {
+      if (e.data && (e.data.type === 'SCAN_STARTED' || e.data.type === 'FOLDER_SCAN_STARTED' || e.data.type === 'BINARY_SCAN_STARTED' || e.data.type === 'CONTAINER_SCAN_STARTED' || e.data.type === 'GIT_SCAN_STARTED')) {
         setAnalysis((prev: any) => ({ ...prev, status: 'RUNNING' }));
       }
     };
@@ -265,28 +265,44 @@ export default function CBOM({
     return () => window.removeEventListener('message', handleMsg);
   }, []);
 
-  const resolvedTargetType = (analysis?.targetType) || (analyses.find(a => a.analysisId === currentAnalysisId)?.targetType) || '';
+  const resolvedTargetType = 
+    (analysis?.targetType) || 
+    (analyses.find(a => a.analysisId === currentAnalysisId)?.targetType) || 
+    (currentAnalysisId ? localStorage.getItem(`cryptavista_target_type_${currentAnalysisId}`) : null) || 
+    localStorage.getItem('cryptavista_selected_target_type') || 
+    '';
+
+  // Use a ref-based mount timestamp so the iframe src changes on every component mount
+  // This ensures CBOMKit is always loaded fresh when navigating to the CBOM page
+  const iframeMountKeyRef = useRef<number>(Date.now());
+  useEffect(() => {
+    iframeMountKeyRef.current = Date.now();
+  }, [currentAnalysisId]);
+
   const iframeSrc = React.useMemo(() => {
     if (!currentAnalysisId) return '';
-    return `http://localhost:8001/?analysisId=${encodeURIComponent(currentAnalysisId)}&targetType=${encodeURIComponent(resolvedTargetType)}&v=20260918v5`;
+    return `http://localhost:8001/?analysisId=${encodeURIComponent(currentAnalysisId)}&targetType=${encodeURIComponent(resolvedTargetType)}&v=${iframeMountKeyRef.current}`;
   }, [currentAnalysisId, resolvedTargetType]);
 
-  const lastLoadedRef = useRef<{ id: string; target: string }>({ id: '', target: '' });
+  // Send LOAD_ANALYSIS to the iframe whenever the analysis ID, target type, or completion status changes
+  const lastSentAnalysisRef = useRef<string>('');
   useEffect(() => {
-    if (currentAnalysisId && (currentAnalysisId !== lastLoadedRef.current.id || resolvedTargetType !== lastLoadedRef.current.target) && iframeRef.current?.contentWindow) {
-      lastLoadedRef.current = { id: currentAnalysisId, target: resolvedTargetType };
-      try {
-        iframeRef.current.contentWindow.postMessage({
-          type: 'LOAD_ANALYSIS',
-          analysisId: currentAnalysisId,
-          targetType: resolvedTargetType,
-          status: analysis?.status,
-          assets: assets
-        }, '*');
-      } catch { }
-    }
+    if (!currentAnalysisId || !iframeRef.current?.contentWindow) return;
+    const key = `${currentAnalysisId}:${resolvedTargetType}:${analysis?.status}`;
+    if (key === lastSentAnalysisRef.current) return;
+    lastSentAnalysisRef.current = key;
+    try {
+      iframeRef.current.contentWindow.postMessage({
+        type: 'LOAD_ANALYSIS',
+        analysisId: currentAnalysisId,
+        targetType: resolvedTargetType,
+        status: analysis?.status,
+        assets: assets
+      }, '*');
+    } catch { }
   }, [currentAnalysisId, resolvedTargetType, analysis?.status, assets]);
 
+  // Send UPDATE_ASSETS when assets become available
   useEffect(() => {
     if (currentAnalysisId && iframeRef.current?.contentWindow && assets.length > 0) {
       try {
@@ -299,15 +315,16 @@ export default function CBOM({
     }
   }, [currentAnalysisId, assets]);
 
+
   // State calculations
   const isCompleted = !loading && (analysis?.status === 'COMPLETED' || (assets.length > 0 && analysis?.status !== 'RUNNING' && analysis?.status !== 'FAILED'));
-  const isRunning = isScanning || (!loading && (analysis?.status === 'RUNNING' || analysis?.status === 'CREATED'));
+  const isRunning = isScanning || (!loading && analysis?.status === 'RUNNING');
   const isFailed = !loading && (analysis?.status === 'FAILED' || !!scanError) && !isRunning;
-  const isNotStarted = !loading && !isCompleted && !isRunning && !isFailed;
+  const isWaitingForInput = !loading && !isCompleted && !isRunning && !isFailed;
 
   // Background status polling when analysis is in progress
   useEffect(() => {
-    if (!currentAnalysisId || isCompleted || isFailed) return;
+    if (!currentAnalysisId || isCompleted || isFailed || isWaitingForInput) return;
 
     const interval = setInterval(async () => {
       try {
@@ -332,7 +349,7 @@ export default function CBOM({
     }, 1000);
 
     return () => clearInterval(interval);
-  }, [currentAnalysisId, isCompleted, isFailed, fetchData, fetchIncrementalData]);
+  }, [currentAnalysisId, isCompleted, isFailed, isWaitingForInput, fetchData, fetchIncrementalData]);
 
   const filtered = assets.filter(a =>
     !search ||
@@ -350,19 +367,29 @@ export default function CBOM({
   };
 
   // Check reachability of external CBOMKit service on port 8001
-  const checkCBOMKit = async () => {
+  const checkCBOMKit = async (retries = 2) => {
     setIsCheckingCbomKit(true);
-    try {
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 2000);
-      await fetch("http://localhost:8001/", { mode: "no-cors", signal: controller.signal });
-      clearTimeout(timeoutId);
-      setCbomKitOnline(true);
-    } catch {
-      setCbomKitOnline(false);
-    } finally {
-      setIsCheckingCbomKit(false);
+    for (let i = 0; i <= retries; i++) {
+      try {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 4000);
+        await fetch("http://localhost:8001/", { mode: "no-cors", signal: controller.signal });
+        clearTimeout(timeoutId);
+        setCbomKitOnline(true);
+        setIsCheckingCbomKit(false);
+        return;
+      } catch {
+        if (i === retries) {
+          // If the iframe already mounted and fired onLoad, keep online
+          if (!iframeRef.current) {
+            setCbomKitOnline(false);
+          }
+        } else {
+          await new Promise(r => setTimeout(r, 1000));
+        }
+      }
     }
+    setIsCheckingCbomKit(false);
   };
 
   useEffect(() => {
@@ -637,9 +664,9 @@ export default function CBOM({
             icon={<Box size={18} strokeWidth={2} className="w-[18px] h-[18px] shrink-0 text-blue-600" />}
             title="Total Cryptographic Asset Occurrences"
             titleColorClass="text-[#6b7589]"
-            badgeText="100%"
+            badgeText={isWaitingForInput ? "-" : "100%"}
             badgeClass="bg-blue-50 text-blue-700 border border-blue-200"
-            mainValue={loading ? "…" : (!analysis && assets.length === 0) ? "-" : cbomClassification.totalAssets}
+            mainValue={loading ? "…" : isWaitingForInput || (!analysis && assets.length === 0) ? "-" : cbomClassification.totalAssets}
             description="Total occurrences"
             descriptionColorClass="text-[#6b7589]"
             borderColorClass="border-[#dde1e9]"
@@ -647,7 +674,7 @@ export default function CBOM({
             secondaryContent={
               <div className="bg-[#f0f5fc] border border-[#d3e2f5] rounded-md px-3 py-2 text-center">
                 <div className="text-xl font-bold text-[#1e3a5f] leading-none">
-                  {loading ? "…" : (!analysis && assets.length === 0) ? "-" : (cbomClassification.uniqueLogicalAssets || 0)}
+                  {loading ? "…" : isWaitingForInput || (!analysis && assets.length === 0) ? "-" : (cbomClassification.uniqueLogicalAssets || 0)}
                 </div>
                 <div className="text-[10px] font-semibold text-[#1e3a5f] mt-1">
                   Unique Cryptographic Assets
@@ -661,9 +688,9 @@ export default function CBOM({
             icon={<ShieldCheck size={18} className="w-[18px] h-[18px] shrink-0 text-emerald-600" />}
             title="Quantum Safe"
             titleColorClass="text-emerald-800"
-            badgeText={cbomClassification.quantumSafePct}
+            badgeText={isWaitingForInput ? "-" : cbomClassification.quantumSafePct}
             badgeClass="bg-emerald-50 text-emerald-700 border border-emerald-200"
-            mainValue={loading ? "…" : (!analysis && assets.length === 0) ? "-" : cbomClassification.quantumSafe}
+            mainValue={loading ? "…" : isWaitingForInput || (!analysis && assets.length === 0) ? "-" : cbomClassification.quantumSafe}
             description="Post-quantum algorithms"
             descriptionColorClass="text-emerald-700/80"
             borderColorClass="border-emerald-200"
@@ -675,9 +702,9 @@ export default function CBOM({
             icon={<ShieldAlert size={18} className="w-[18px] h-[18px] shrink-0 text-red-600" />}
             title="Quantum Vulnerable"
             titleColorClass="text-red-800"
-            badgeText={cbomClassification.quantumVulnerablePct}
+            badgeText={isWaitingForInput ? "-" : cbomClassification.quantumVulnerablePct}
             badgeClass="bg-red-50 text-red-700 border border-red-200"
-            mainValue={loading ? "…" : (!analysis && assets.length === 0) ? "-" : cbomClassification.quantumVulnerable}
+            mainValue={loading ? "…" : isWaitingForInput || (!analysis && assets.length === 0) ? "-" : cbomClassification.quantumVulnerable}
             description="Classical public-key algorithms"
             descriptionColorClass="text-red-700/80"
             borderColorClass="border-red-200"
@@ -689,9 +716,9 @@ export default function CBOM({
             icon={<AlertTriangle size={18} className="w-[18px] h-[18px] shrink-0 text-amber-600" />}
             title="Quantum-Weakened"
             titleColorClass="text-amber-800"
-            badgeText={cbomClassification.quantumWeakenedPct}
+            badgeText={isWaitingForInput ? "-" : cbomClassification.quantumWeakenedPct}
             badgeClass="bg-amber-50 text-amber-700 border border-amber-200"
-            mainValue={loading ? "…" : (!analysis && assets.length === 0) ? "-" : cbomClassification.quantumWeakened}
+            mainValue={loading ? "…" : isWaitingForInput || (!analysis && assets.length === 0) ? "-" : cbomClassification.quantumWeakened}
             description="Classical symmetric cryptography"
             descriptionColorClass="text-amber-700/80"
             borderColorClass="border-amber-200"
@@ -703,9 +730,9 @@ export default function CBOM({
             icon={<HelpCircle size={18} className="w-[18px] h-[18px] shrink-0 text-gray-500" />}
             title="Unknown"
             titleColorClass="text-[#6b7589]"
-            badgeText={cbomClassification.unknownPct}
+            badgeText={isWaitingForInput ? "-" : cbomClassification.unknownPct}
             badgeClass="bg-gray-50 text-gray-700 border border-gray-200"
-            mainValue={loading ? "…" : (!analysis && assets.length === 0) ? "-" : cbomClassification.unknown}
+            mainValue={loading ? "…" : isWaitingForInput || (!analysis && assets.length === 0) ? "-" : cbomClassification.unknown}
             description="Unrecognized / insufficient evidence"
             descriptionColorClass="text-[#6b7589]"
             borderColorClass="border-[#dde1e9]"
@@ -745,7 +772,7 @@ export default function CBOM({
                 </p>
                 <div className="flex items-center gap-3">
                   <button
-                    onClick={checkCBOMKit}
+                    onClick={() => checkCBOMKit()}
                     disabled={isCheckingCbomKit}
                     className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-md text-xs font-semibold shadow transition-colors flex items-center gap-1.5"
                   >
@@ -773,10 +800,13 @@ export default function CBOM({
                   try {
                     const iframe = e.currentTarget;
                     if (iframe.contentWindow) {
+                      // Reset the deduplication ref so the useEffect can re-fire after the iframe reloads
+                      lastSentAnalysisRef.current = '';
                       iframe.contentWindow.postMessage({
                         type: 'LOAD_ANALYSIS',
                         analysisId: currentAnalysisId,
                         targetType: resolvedTargetType,
+                        status: analysis?.status,
                         assets: assets
                       }, '*');
                     }
@@ -822,12 +852,14 @@ export default function CBOM({
                     <div className="font-semibold mb-1">Cryptographic Analysis Failed</div>
                     <div className="text-xs text-red-500 font-mono">{analysis.errorMessage || 'Error occurred during discovery.'}</div>
                   </td></tr>
-                ) : (analysis?.status === 'RUNNING' || analysis?.status === 'CREATED') ? (
+                ) : isRunning ? (
                   <tr><td colSpan={6} className="p-8 text-center text-blue-600">
                     <Loader2 className="animate-spin inline mr-2" size={16} />Cryptographic discovery in progress...
                   </td></tr>
                 ) : filtered.length === 0 ? (
-                  <tr><td colSpan={6} className="p-8 text-center text-gray-500">No cryptographic assets detected in this application.</td></tr>
+                  <tr><td colSpan={6} className="p-8 text-center text-gray-500">
+                    {isWaitingForInput ? "Awaiting input. Please provide scan configuration in the CBOM interface above and click Scan." : "No cryptographic assets detected in this application."}
+                  </td></tr>
                 ) : (
                   filtered.map((rawAsset, idx) => {
                     const norm = classifyAsset(rawAsset);

@@ -128,6 +128,29 @@ export default function App() {
 
   useEffect(() => {
     refreshAnalyses();
+    const handlePopState = () => {
+      try {
+        const params = new URLSearchParams(window.location.search);
+        let p = params.get("page");
+        if (p) {
+          const decoded = decodeURIComponent(p);
+          setActivePage(decoded);
+          if (decoded.startsWith("cbom:") || decoded.startsWith("cbomkit_discovery:")) {
+            const id = decoded.split(":")[1];
+            if (id) setSelectedAnalysisId(id);
+          }
+        } else if (window.location.hash) {
+          const decoded = decodeURIComponent(window.location.hash.replace(/^#\/?/, ""));
+          setActivePage(decoded);
+          if (decoded.startsWith("cbom:") || decoded.startsWith("cbomkit_discovery:")) {
+            const id = decoded.split(":")[1];
+            if (id) setSelectedAnalysisId(id);
+          }
+        }
+      } catch {}
+    };
+    window.addEventListener("popstate", handlePopState);
+    return () => window.removeEventListener("popstate", handlePopState);
   }, []);
   
   const decodedActivePage = decodeURIComponent(activePage);
@@ -150,6 +173,7 @@ export default function App() {
       } catch (e) {
         console.warn("Could not save selected analysis to localStorage", e);
       }
+      refreshAnalyses(pageParam);
     }
   }, [pageParam]);
 
